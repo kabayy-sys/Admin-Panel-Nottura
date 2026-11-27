@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AppShell } from "@/components/AppShell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,10 +21,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // TODO(Arya): Bungkus layout utama dengan AppShell / Sidebar / Header / tema dark mode (#121212, #090A33, #FFFFFF).
   return (
-    <html lang="id">
-      <body>{children}</body>
+    <html lang="id" className="dark">
+      <body className="bg-[#121212] text-white antialiased selection:bg-white/20 selection:text-white">
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }
