@@ -2,6 +2,17 @@
 
 import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { motion } from "motion/react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  MessageCircle,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import type {
   CustomerRow,
   CustomerStatus,
@@ -30,6 +41,10 @@ import {
   formatShortDate,
   getCustomerStatusMeta,
 } from "@/components/formatters";
+import { CopyButton } from "@/components/ui/CopyButton";
+import { Modal } from "@/components/ui/Modal";
+import { PageTransition } from "@/components/ui/MotionPrimitives";
+import { useToast } from "@/components/ui/ToastProvider";
 
 const STATUS_TABS: { value: CustomerStatus | "all"; label: string }[] = [
   { value: "all", label: "Semua" },
@@ -39,6 +54,7 @@ const STATUS_TABS: { value: CustomerStatus | "all"; label: string }[] = [
 ];
 
 function CustomersContent() {
+  const toast = useToast();
   const searchParams = useSearchParams();
   const initialStatusParam = searchParams.get("status") as
     | CustomerStatus
@@ -76,7 +92,6 @@ function CustomersContent() {
     }
   }, [initialStatusParam, setStatusFilter]);
 
-  // Demo mode fallback when Supabase is not configured locally
   const initialDemo = useMemo(() => buildDemoSeed(), []);
   const [demoRawCustomers, setDemoRawCustomers] = useState<CustomerRow[]>(
     initialDemo.customers,
@@ -115,7 +130,6 @@ function CustomersContent() {
     customers,
   ]);
 
-  // Tab counts
   const counts = useMemo(() => {
     return {
       all: activeAllCustomers.length,
@@ -127,7 +141,8 @@ function CustomersContent() {
     };
   }, [activeAllCustomers]);
 
-  // Add / Edit Customer Modal State
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] =
     useState<EnrichedCustomer | null>(null);
@@ -145,7 +160,6 @@ function CustomersContent() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("QRIS");
   const [gmailWarning, setGmailWarning] = useState<string | null>(null);
 
-  // Renew (+30 hari) Confirmation Modal State (PRD Section 4.D: memunculkan form konfirmasi pencatatan pemasukan ke Keuangan)
   const [renewTarget, setRenewTarget] = useState<EnrichedCustomer | null>(null);
   const [renewDays, setRenewDays] = useState(30);
   const [renewRecordIncome, setRenewRecordIncome] = useState(true);
@@ -196,7 +210,7 @@ function CustomersContent() {
     try {
       setEndDate(calculateDefaultEndDate(value, 30));
     } catch {
-      // ignore partial date
+      // ignore partial input
     }
   }
 
@@ -209,58 +223,50 @@ function CustomersContent() {
     event.preventDefault();
     const normalizedWa = normalizeWhatsApp(whatsapp);
 
-    if (isUsingDemo) {
-      if (editingCustomer) {
-        setDemoRawCustomers((prev) =>
-          prev.map((c) =>
-            c.id === editingCustomer.id
-              ? {
-                  ...c,
-                  full_name: fullName.trim(),
-                  whatsapp: normalizedWa,
-                  gmail: gmail.trim().toLowerCase(),
-                  family_group_id: familyGroupId || null,
-                  package_name: packageName,
-                  start_date: startDate,
-                  end_date: endDate,
-                }
-              : c,
-          ),
-        );
-      } else {
-        setDemoRawCustomers((prev) => [
-          {
-            id: `demo-cust-${Date.now()}`,
-            full_name: fullName.trim(),
-            whatsapp: normalizedWa,
-            gmail: gmail.trim().toLowerCase(),
-            family_group_id: familyGroupId || null,
-            package_name: packageName,
-            start_date: startDate,
-            end_date: endDate,
-            created_by: "arya@nottura.my.id",
-            created_at: getTodayDateString(),
-          },
-          ...prev,
-        ]);
+    try {
+      if (isUsingDemo) {
+        if (editingCustomer) {
+          setDemoRawCustomers((prev) =>
+            prev.map((c) =>
+              c.id === editingCustomer.id
+                ? {
+                    ...c,
+                    full_name: fullName.trim(),
+                    whatsapp: normalizedWa,
+                    gmail: gmail.trim().toLowerCase(),
+                    family_group_id: familyGroupId || null,
+                    package_name: packageName,
+                    start_date: startDate,
+                    end_date: endDate,
+                  }
+                : c,
+            ),
+          );
+          toast.success(`Data ${fullName.trim()} diperbarui`);
+        } else {
+          setDemoRawCustomers((prev) => [
+            {
+              id: `demo-cust-${Date.now()}`,
+              full_name: fullName.trim(),
+              whatsapp: normalizedWa,
+              gmail: gmail.trim().toLowerCase(),
+              family_group_id: familyGroupId || null,
+              package_name: packageName,
+              start_date: startDate,
+              end_date: endDate,
+              created_by: "nottura@local",
+              created_at: getTodayDateString(),
+            },
+            ...prev,
+          ]);
+          toast.success(`Pelanggan ${fullName.trim()} ditambahkan`);
+        }
+        setFormModalOpen(false);
+        return;
       }
-      setFormModalOpen(false);
-      return;
-    }
 
-    if (editingCustomer) {
-      await updateCustomer(editingCustomer.id, {
-        full_name: fullName.trim(),
-        whatsapp: normalizedWa,
-        gmail: gmail.trim(),
-        family_group_id: familyGroupId || null,
-        package_name: packageName,
-        start_date: startDate,
-        end_date: endDate,
-      });
-    } else {
-      await createCustomer(
-        {
+      if (editingCustomer) {
+        await updateCustomer(editingCustomer.id, {
           full_name: fullName.trim(),
           whatsapp: normalizedWa,
           gmail: gmail.trim(),
@@ -268,17 +274,35 @@ function CustomersContent() {
           package_name: packageName,
           start_date: startDate,
           end_date: endDate,
-        },
-        {
-          recordIncome: {
-            record: recordIncome,
-            amount: incomeAmount,
-            payment_method: paymentMethod,
+        });
+        toast.success(`Data ${fullName.trim()} diperbarui`);
+      } else {
+        await createCustomer(
+          {
+            full_name: fullName.trim(),
+            whatsapp: normalizedWa,
+            gmail: gmail.trim(),
+            family_group_id: familyGroupId || null,
+            package_name: packageName,
+            start_date: startDate,
+            end_date: endDate,
           },
-        },
+          {
+            recordIncome: {
+              record: recordIncome,
+              amount: incomeAmount,
+              payment_method: paymentMethod,
+            },
+          },
+        );
+        toast.success(`Pelanggan ${fullName.trim()} ditambahkan`);
+      }
+      setFormModalOpen(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menyimpan data pelanggan",
       );
     }
-    setFormModalOpen(false);
   }
 
   function openRenewModal(customer: EnrichedCustomer) {
@@ -293,71 +317,107 @@ function CustomersContent() {
     event.preventDefault();
     if (!renewTarget) return;
 
-    if (isUsingDemo) {
-      const nextEnd = calculateRenewedEndDate(renewTarget.end_date, renewDays);
-      setDemoRawCustomers((prev) =>
-        prev.map((c) =>
-          c.id === renewTarget.id ? { ...c, end_date: nextEnd } : c,
-        ),
+    try {
+      if (isUsingDemo) {
+        const nextEnd = calculateRenewedEndDate(
+          renewTarget.end_date,
+          renewDays,
+        );
+        setDemoRawCustomers((prev) =>
+          prev.map((c) =>
+            c.id === renewTarget.id ? { ...c, end_date: nextEnd } : c,
+          ),
+        );
+        toast.success(
+          `${renewTarget.full_name} diperpanjang +${renewDays} hari`,
+        );
+        setRenewTarget(null);
+        return;
+      }
+
+      await renewCustomer(renewTarget.id, {
+        days: renewDays,
+        recordIncome: {
+          record: renewRecordIncome,
+          amount: renewAmount,
+          payment_method: renewPaymentMethod,
+        },
+      });
+      toast.success(
+        `${renewTarget.full_name} diperpanjang +${renewDays} hari`,
       );
       setRenewTarget(null);
-      return;
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal memperpanjang masa aktif",
+      );
     }
-
-    await renewCustomer(renewTarget.id, {
-      days: renewDays,
-      recordIncome: {
-        record: renewRecordIncome,
-        amount: renewAmount,
-        payment_method: renewPaymentMethod,
-      },
-    });
-    setRenewTarget(null);
   }
 
   async function handleDeleteCustomer(customer: EnrichedCustomer) {
-    if (isUsingDemo) {
-      setDemoRawCustomers((prev) => prev.filter((c) => c.id !== customer.id));
+    if (confirmDeleteId !== customer.id) {
+      setConfirmDeleteId(customer.id);
+      window.setTimeout(() => {
+        setConfirmDeleteId((current) =>
+          current === customer.id ? null : current,
+        );
+      }, 3000);
       return;
     }
-    await deleteCustomer(customer.id);
+
+    setConfirmDeleteId(null);
+    try {
+      if (isUsingDemo) {
+        setDemoRawCustomers((prev) => prev.filter((c) => c.id !== customer.id));
+        toast.success(`${customer.full_name} dihapus`);
+        return;
+      }
+      await deleteCustomer(customer.id);
+      toast.success(`${customer.full_name} dihapus`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menghapus pelanggan",
+      );
+    }
   }
 
   return (
-    <div className="space-y-6">
+    <PageTransition className="space-y-6">
       {/* Top Header & Quick Actions */}
-      <section className="bg-[#090A33] border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+      <section className="surface-card rounded-2xl p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="text-base sm:text-lg font-semibold text-white">
+              <h2 className="text-base font-semibold text-[#FAFAFA] tracking-tight">
                 Datalist Pelanggan Harian
               </h2>
               {isUsingDemo ? (
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                  Mode Preview Data Dummy
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#EAB308]" />
+                  Preview Data Dummy
                 </span>
               ) : null}
             </div>
-            <p className="text-xs text-white/65 mt-0.5">
-              Kontrol masa aktif pelanggan, kirim pengingat WA 1-klik, dan
-              perpanjang (+30 hari) otomatis tercatat ke Keuangan.
+            <p className="text-xs text-[#71717A] mt-1">
+              Kontrol masa aktif, kirim pengingat WA 1-klik, dan perpanjang
+              (+30 hari) otomatis tercatat ke Keuangan.
             </p>
           </div>
 
-          <button
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             type="button"
             onClick={openCreateModal}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold text-xs sm:text-sm px-4 py-2.5 transition cursor-pointer shadow-sm"
+            className="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold text-xs sm:text-sm px-4 py-2 transition cursor-pointer"
           >
-            <span>+ Tambah Pelanggan</span>
-          </button>
+            <Plus className="h-4 w-4" />
+            <span>Tambah Pelanggan</span>
+          </motion.button>
         </div>
 
         {/* Filter Tabs + Search + Group Filter */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-2 border-t border-white/10">
-          {/* Quick Status Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-white/[0.08]">
+          <div className="inline-flex flex-wrap items-center gap-1 rounded-xl surface-inset p-1">
             {STATUS_TABS.map((tab) => {
               const active = statusFilter === tab.value;
               const count = counts[tab.value];
@@ -366,44 +426,65 @@ function CustomersContent() {
                   key={tab.value}
                   type="button"
                   onClick={() => setStatusFilter(tab.value)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer border ${
-                    active
-                      ? "bg-white text-[#090A33] border-white font-semibold"
-                      : "bg-[#121212] text-white/70 hover:text-white border-white/10"
+                  className={`relative whitespace-nowrap inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    active ? "text-[#FAFAFA]" : "text-[#71717A] hover:text-[#E4E4E7]"
                   }`}
                 >
-                  <span>{tab.label}</span>
-                  <span
-                    className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                      active
-                        ? "bg-[#090A33]/15 text-[#090A33]"
-                        : "bg-white/10 text-white/75"
-                    }`}
-                  >
-                    {count}
+                  {active ? (
+                    <motion.span
+                      layoutId="customers-status-tab"
+                      transition={{
+                        type: "spring",
+                        stiffness: 420,
+                        damping: 35,
+                      }}
+                      className="absolute inset-0 rounded-lg bg-[#17171D] border border-white/[0.1]"
+                    />
+                  ) : null}
+                  <span className="relative z-10 inline-flex items-center gap-1.5">
+                    <span>{tab.label}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-md font-mono text-[10px] tabular-nums ${
+                        active
+                          ? "bg-[#22222A] text-[#FAFAFA]"
+                          : "bg-[#17171D] text-[#71717A]"
+                      }`}
+                    >
+                      {count}
+                    </span>
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Search & Group Filter */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
             <div className="relative flex-1 sm:w-64">
+              <Search className="h-3.5 w-3.5 text-[#71717A] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
-                type="search"
+                type="text"
                 placeholder="Cari nama, Gmail, atau 628..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-xl bg-[#121212] border border-white/15 pl-3.5 pr-3 py-2 text-xs sm:text-sm text-white placeholder:text-white/40 focus:outline-none focus:border-white/40"
+                className="input-field w-full rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm placeholder:text-[#52525B]"
               />
+              {search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Hapus pencarian"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#71717A] hover:text-[#FAFAFA] cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
             </div>
 
             <select
               value={groupFilter}
               onChange={(e) => setGroupFilter(e.target.value)}
               aria-label="Filter Grup Family"
-              className="rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-xs sm:text-sm text-white focus:outline-none focus:border-white/40"
+              className="input-field rounded-xl px-3 py-2 text-xs sm:text-sm"
             >
               <option value="all">Semua Grup Family</option>
               {activeGroups.map((group) => (
@@ -419,81 +500,87 @@ function CustomersContent() {
       {error && supabaseConfigured ? (
         <div
           role="alert"
-          className="rounded-2xl bg-rose-500/15 border border-rose-500/30 px-4 py-3 text-xs text-rose-200"
+          className="rounded-2xl bg-[#17171D] border border-white/[0.1] border-l-2 border-l-[#EF4444] px-4 py-3 text-xs text-[#E4E4E7]"
         >
           {error}
         </div>
       ) : null}
 
-      {/* Loading State */}
       {loading && activeCustomers.length === 0 ? (
-        <div className="bg-[#090A33] border border-white/10 rounded-2xl p-8 text-center text-xs text-white/60">
+        <div className="surface-card rounded-2xl p-8 text-center text-xs text-[#71717A]">
           Memuat data pelanggan...
         </div>
       ) : null}
 
-      {/* Mobile-Friendly Cards (Visible on < md screens per PRD Section 3: Mobile-Friendly) */}
+      {/* Mobile-Friendly Cards */}
       <section className="md:hidden space-y-3">
         {activeCustomers.length === 0 ? (
-          <div className="bg-[#090A33] border border-white/10 rounded-2xl p-8 text-center text-xs text-white/60">
+          <div className="surface-card rounded-2xl p-8 text-center text-xs text-[#71717A]">
             Tidak ada pelanggan yang cocok dengan filter pencarian.
           </div>
         ) : (
           activeCustomers.map((customer) => {
             const st = getCustomerStatusMeta(customer.status);
+            const confirmingDelete = confirmDeleteId === customer.id;
             return (
               <div
                 key={customer.id}
-                className="bg-[#090A33] border border-white/10 rounded-2xl p-4 space-y-3"
+                className="surface-card rounded-2xl p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">
+                    <p className="text-sm font-semibold text-[#FAFAFA] truncate">
                       {customer.full_name}
                     </p>
-                    <p className="text-xs text-white/65 truncate">
-                      {customer.gmail}
-                    </p>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <p className="text-xs font-mono text-[#71717A] truncate">
+                        {customer.gmail}
+                      </p>
+                      <CopyButton value={customer.gmail} label="Gmail" />
+                    </div>
                   </div>
                   <span
                     className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${st.badgeClass}`}
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full ${st.dotClass}`} />
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${st.dotClass}`}
+                    />
                     {st.label}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs bg-[#121212]/70 border border-white/10 rounded-xl p-3">
+                <div className="grid grid-cols-2 gap-2.5 text-xs surface-inset rounded-xl p-3">
                   <div>
-                    <span className="text-white/50 block text-[11px]">
-                      Grup & Paket
+                    <span className="text-[#71717A] block text-[11px]">
+                      Grup &amp; Paket
                     </span>
-                    <span className="text-white font-medium">
+                    <span className="text-[#FAFAFA] font-medium">
                       {customer.family_group_name ?? "-"} &bull;{" "}
                       {customer.package_name}
                     </span>
                   </div>
                   <div>
-                    <span className="text-white/50 block text-[11px]">
+                    <span className="text-[#71717A] block text-[11px]">
                       WhatsApp
                     </span>
-                    <span className="text-white font-mono">
-                      {customer.whatsapp}
+                    <span className="inline-flex items-center gap-1 text-[#FAFAFA] font-mono">
+                      <span>{customer.whatsapp}</span>
+                      <CopyButton value={customer.whatsapp} label="WhatsApp" />
                     </span>
                   </div>
                   <div>
-                    <span className="text-white/50 block text-[11px]">
+                    <span className="text-[#71717A] block text-[11px]">
                       Mulai
                     </span>
-                    <span className="text-white/80">
+                    <span className="font-mono text-[#A1A1AA]">
                       {formatShortDate(customer.start_date)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-white/50 block text-[11px]">
+                    <span className="text-[#71717A] block text-[11px]">
                       Berakhir
                     </span>
-                    <span className="text-white font-medium">
+                    <span className="font-mono text-[#FAFAFA] font-medium">
                       {formatShortDate(customer.end_date)}
                     </span>
                   </div>
@@ -504,30 +591,36 @@ function CustomersContent() {
                     href={customer.remind_wa_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex-1 text-center rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/35 py-2 px-3 text-xs font-medium"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#17171D] hover:bg-[#22222A] text-[#FAFAFA] border border-white/[0.1] py-2 px-3 text-xs font-medium transition"
                   >
-                    Remind WA
+                    <MessageCircle className="h-3.5 w-3.5 text-[#22C55E]" />
+                    <span>Remind WA</span>
                   </a>
                   <button
                     type="button"
                     onClick={() => openRenewModal(customer)}
-                    className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/15 py-2 px-3 text-xs font-medium cursor-pointer"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#17171D] hover:bg-[#22222A] text-[#FAFAFA] border border-white/[0.1] py-2 px-3 text-xs font-medium cursor-pointer transition"
                   >
-                    +30 Hari
+                    <CalendarPlus className="h-3.5 w-3.5 text-[#A1A1AA]" />
+                    <span>+30 Hari</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => openEditModal(customer)}
-                    className="rounded-xl bg-white/5 text-white/80 border border-white/10 py-2 px-3 text-xs cursor-pointer"
+                    className="rounded-xl bg-[#0C0C10] hover:bg-[#17171D] text-[#A1A1AA] border border-white/[0.08] py-2 px-3 text-xs cursor-pointer transition"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleDeleteCustomer(customer)}
-                    className="rounded-xl bg-rose-500/15 text-rose-300 border border-rose-500/30 py-2 px-3 text-xs cursor-pointer"
+                    className={`rounded-xl border py-2 px-3 text-xs font-medium cursor-pointer transition ${
+                      confirmingDelete
+                        ? "bg-[#EF4444] text-white border-[#EF4444]"
+                        : "bg-[#0C0C10] text-[#A1A1AA] border-white/[0.08]"
+                    }`}
                   >
-                    Hapus
+                    {confirmingDelete ? "Yakin?" : "Hapus"}
                   </button>
                 </div>
               </div>
@@ -536,12 +629,12 @@ function CustomersContent() {
         )}
       </section>
 
-      {/* Desktop Table (Visible on md+ screens with all 9 columns from PRD Section 4.D) */}
-      <section className="hidden md:block bg-[#090A33] border border-white/10 rounded-2xl overflow-hidden">
+      {/* Desktop 9-Column Table */}
+      <section className="hidden md:block surface-card rounded-2xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-white/10 text-[11px] font-semibold uppercase tracking-wider text-white/60 bg-black/20">
+              <tr className="border-b border-white/[0.08] text-[11px] font-semibold uppercase tracking-wider text-[#71717A] bg-[#0C0C10]">
                 <th className="py-3.5 px-4">Nama Lengkap</th>
                 <th className="py-3.5 px-4">WhatsApp</th>
                 <th className="py-3.5 px-4">Alamat Gmail</th>
@@ -553,12 +646,12 @@ function CustomersContent() {
                 <th className="py-3.5 px-4 text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/10 text-xs sm:text-sm">
+            <tbody className="divide-y divide-white/[0.07] text-xs sm:text-sm">
               {activeCustomers.length === 0 ? (
                 <tr>
                   <td
                     colSpan={9}
-                    className="py-10 text-center text-sm text-white/55"
+                    className="py-12 text-center text-sm text-[#71717A]"
                   >
                     Tidak ada data pelanggan yang sesuai filter.
                   </td>
@@ -566,36 +659,46 @@ function CustomersContent() {
               ) : (
                 activeCustomers.map((customer) => {
                   const st = getCustomerStatusMeta(customer.status);
+                  const confirmingDelete = confirmDeleteId === customer.id;
                   return (
                     <tr
                       key={customer.id}
-                      className="hover:bg-white/[0.03] transition"
+                      className="hover:bg-[#17171D]/55 transition"
                     >
-                      <td className="py-3.5 px-4 font-medium text-white whitespace-nowrap">
+                      <td className="py-3.5 px-4 font-medium text-[#FAFAFA] whitespace-nowrap">
                         {customer.full_name}
                       </td>
-                      <td className="py-3.5 px-4 font-mono text-xs text-white/80 whitespace-nowrap">
-                        {customer.whatsapp}
+                      <td className="py-3.5 px-4 font-mono text-xs text-[#A1A1AA] whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <span>{customer.whatsapp}</span>
+                          <CopyButton
+                            value={customer.whatsapp}
+                            label="WhatsApp"
+                          />
+                        </span>
                       </td>
-                      <td className="py-3.5 px-4 text-white/80">
-                        {customer.gmail}
+                      <td className="py-3.5 px-4 font-mono text-xs text-[#A1A1AA]">
+                        <span className="inline-flex items-center gap-1">
+                          <span>{customer.gmail}</span>
+                          <CopyButton value={customer.gmail} label="Gmail" />
+                        </span>
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-md text-xs bg-white/10 text-white/85 border border-white/15">
+                        <span className="px-2 py-0.5 rounded-md text-xs font-mono bg-[#0C0C10] text-[#E4E4E7] border border-white/[0.08]">
                           {customer.family_group_name ?? "Belum dipilih"}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-white/85 whitespace-nowrap">
+                      <td className="py-3.5 px-4 text-[#E4E4E7] whitespace-nowrap text-xs">
                         {customer.package_name}
                       </td>
-                      <td className="py-3.5 px-4 text-white/70 whitespace-nowrap">
+                      <td className="py-3.5 px-4 font-mono text-xs text-[#71717A] whitespace-nowrap">
                         {formatShortDate(customer.start_date)}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="text-white font-medium">
+                        <div className="font-mono text-xs text-[#FAFAFA] font-medium">
                           {formatShortDate(customer.end_date)}
                         </div>
-                        <div className="text-[11px] text-white/50">
+                        <div className="text-[11px] text-[#71717A]">
                           {customer.days_remaining < 0
                             ? `Lewat ${Math.abs(customer.days_remaining)} hari`
                             : customer.days_remaining === 0
@@ -605,7 +708,7 @@ function CustomersContent() {
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${st.badgeClass}`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${st.badgeClass}`}
                         >
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${st.dotClass}`}
@@ -613,37 +716,48 @@ function CustomersContent() {
                           {st.label}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap space-x-1.5">
-                        <a
-                          href={customer.remind_wa_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/35 px-2.5 py-1.5 text-xs font-medium transition"
-                        >
-                          Remind WA
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => openRenewModal(customer)}
-                          className="rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/15 px-2.5 py-1.5 text-xs font-medium cursor-pointer"
-                        >
-                          Perpanjang (+30h)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(customer)}
-                          className="rounded-lg bg-white/5 hover:bg-white/10 text-white/80 border border-white/10 px-2.5 py-1.5 text-xs cursor-pointer"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          disabled={submitting}
-                          onClick={() => void handleDeleteCustomer(customer)}
-                          className="rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-2.5 py-1.5 text-xs cursor-pointer"
-                        >
-                          Hapus
-                        </button>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          <a
+                            href={customer.remind_wa_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#17171D] hover:bg-[#22222A] text-[#FAFAFA] border border-white/[0.1] px-2.5 py-1.5 text-xs font-medium transition"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5 text-[#22C55E]" />
+                            <span>Remind WA</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => openRenewModal(customer)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#17171D] hover:bg-[#22222A] text-[#FAFAFA] border border-white/[0.1] px-2.5 py-1.5 text-xs font-medium cursor-pointer transition"
+                          >
+                            <CalendarPlus className="h-3.5 w-3.5 text-[#A1A1AA]" />
+                            <span>+30h</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(customer)}
+                            title="Edit pelanggan"
+                            className="rounded-lg bg-[#0C0C10] hover:bg-[#17171D] text-[#A1A1AA] hover:text-[#FAFAFA] border border-white/[0.08] p-1.5 text-xs cursor-pointer transition"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => void handleDeleteCustomer(customer)}
+                            title="Hapus pelanggan"
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium cursor-pointer transition ${
+                              confirmingDelete
+                                ? "bg-[#EF4444] text-white border-[#EF4444]"
+                                : "bg-[#0C0C10] hover:bg-[#17171D] text-[#A1A1AA] hover:text-[#EF4444] border-white/[0.08]"
+                            }`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {confirmingDelete ? <span>Yakin?</span> : null}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -655,359 +769,335 @@ function CustomersContent() {
       </section>
 
       {/* Modal Tambah / Edit Pelanggan */}
-      {formModalOpen ? (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-lg bg-[#090A33] border border-white/15 rounded-2xl p-6 shadow-2xl my-8">
-            <div className="flex items-center justify-between pb-4 mb-5 border-b border-white/10">
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  {editingCustomer
-                    ? `Edit Pelanggan: ${editingCustomer.full_name}`
-                    : "Tambah Pelanggan Baru"}
-                </h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  Nomor WA otomatis dinormalisasi ke format{" "}
-                  <code className="text-white/90">628...</code>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setFormModalOpen(false)}
-                className="text-white/60 hover:text-white text-sm px-2 py-1"
-              >
-                &#10005;
-              </button>
+      <Modal
+        open={formModalOpen}
+        onClose={() => setFormModalOpen(false)}
+        title={
+          editingCustomer
+            ? `Edit Pelanggan: ${editingCustomer.full_name}`
+            : "Tambah Pelanggan Baru"
+        }
+        subtitle="Nomor WA otomatis dinormalisasi ke format 628..."
+      >
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Nama Lengkap
+              </label>
+              <input
+                placeholder="Contoh: Rizky Pratama"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm"
+              />
             </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Nama Lengkap
-                  </label>
-                  <input
-                    placeholder="Contoh: Rizky Pratama"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Nomor WhatsApp
+              </label>
+              <input
+                placeholder="0812... atau 62812..."
+                value={whatsapp}
+                onChange={(e) => setWhatsapp(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+              {whatsapp ? (
+                <p className="text-[11px] text-[#71717A] mt-1">
+                  Disimpan sebagai:{" "}
+                  <code className="font-mono text-[#FAFAFA]">
+                    {normalizeWhatsApp(whatsapp)}
+                  </code>
+                </p>
+              ) : null}
+            </div>
+          </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Nomor WhatsApp
-                  </label>
-                  <input
-                    placeholder="0812... atau 62812..."
-                    value={whatsapp}
-                    onChange={(e) => setWhatsapp(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                  {whatsapp ? (
-                    <p className="text-[11px] text-white/55 mt-1">
-                      Disimpan sebagai:{" "}
-                      <code className="text-emerald-300">
-                        {normalizeWhatsApp(whatsapp)}
-                      </code>
-                    </p>
-                  ) : null}
-                </div>
+          <div>
+            <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+              Alamat Gmail Pelanggan
+            </label>
+            <input
+              type="email"
+              placeholder="nama.pelanggan@gmail.com"
+              value={gmail}
+              onChange={(e) => handleGmailChange(e.target.value)}
+              required
+              className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+            />
+            {gmailWarning ? (
+              <div
+                role="status"
+                className="mt-2 rounded-xl bg-[#17171D] border border-white/[0.1] border-l-2 border-l-[#EAB308] px-3.5 py-2.5 text-xs text-[#E4E4E7] flex items-start gap-2"
+              >
+                <AlertTriangle className="h-4 w-4 text-[#EAB308] shrink-0 mt-0.5" />
+                <span>
+                  <strong>Peringatan Cooldown 12 Bulan:</strong> {gmailWarning}
+                </span>
               </div>
+            ) : null}
+          </div>
 
-              <div>
-                <label className="block text-xs font-medium text-white/75 mb-1">
-                  Alamat Gmail Pelanggan
-                </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Grup Family Sharing
+              </label>
+              <select
+                value={familyGroupId}
+                onChange={(e) => setFamilyGroupId(e.target.value)}
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="">-- Pilih Grup Family --</option>
+                {activeGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.group_name} (
+                    {group.is_full
+                      ? "FULL"
+                      : `${group.ready_slots} slot ready`}
+                    )
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Paket Langganan
+              </label>
+              <select
+                value={packageName}
+                onChange={(e) => handlePackageChange(e.target.value)}
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                {PACKAGE_OPTIONS.map((pkg) => (
+                  <option key={pkg.name} value={pkg.name}>
+                    {pkg.name} ({formatRupiah(pkg.price)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Tanggal Mulai
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleStartDateChange(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Tanggal Selesai (Default +30 Hari)
+              </label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+          </div>
+
+          {!editingCustomer ? (
+            <div className="rounded-xl surface-inset p-4 space-y-3">
+              <label className="flex items-center gap-2.5 text-xs font-medium text-[#FAFAFA] cursor-pointer">
                 <input
-                  type="email"
-                  placeholder="nama.pelanggan@gmail.com"
-                  value={gmail}
-                  onChange={(e) => handleGmailChange(e.target.value)}
-                  required
-                  className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
+                  type="checkbox"
+                  checked={recordIncome}
+                  onChange={(e) => setRecordIncome(e.target.checked)}
+                  className="accent-[#FAFAFA]"
                 />
-                {gmailWarning ? (
-                  <div
-                    role="status"
-                    className="mt-2 rounded-xl bg-amber-500/15 border border-amber-500/30 px-3.5 py-2.5 text-xs text-amber-200"
-                  >
-                    <strong>Peringatan Cooldown 12 Bulan:</strong>{" "}
-                    {gmailWarning}
-                  </div>
-                ) : null}
-              </div>
+                <span>
+                  Catat otomatis sebagai Pemasukan (Order Baru) di Keuangan
+                </span>
+              </label>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Grup Family Sharing
-                  </label>
-                  <select
-                    value={familyGroupId}
-                    onChange={(e) => setFamilyGroupId(e.target.value)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  >
-                    <option value="">-- Pilih Grup Family --</option>
-                    {activeGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.group_name} (
-                        {group.is_full
-                          ? "FULL"
-                          : `${group.ready_slots} slot ready`}
-                        )
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Paket Langganan
-                  </label>
-                  <select
-                    value={packageName}
-                    onChange={(e) => handlePackageChange(e.target.value)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  >
-                    {PACKAGE_OPTIONS.map((pkg) => (
-                      <option key={pkg.name} value={pkg.name}>
-                        {pkg.name} ({formatRupiah(pkg.price)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Tanggal Mulai
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => handleStartDateChange(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Tanggal Selesai (Default +30 Hari)
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-              </div>
-
-              {/* Pencatatan Pemasukan Otomatis (Hanya saat tambah pelanggan baru) */}
-              {!editingCustomer ? (
-                <div className="rounded-xl bg-[#121212]/80 border border-white/10 p-4 space-y-3">
-                  <label className="flex items-center gap-2.5 text-xs font-medium text-white cursor-pointer">
+              {recordIncome ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-[#71717A] mb-1">
+                      Nominal Pemasukan (Rp)
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={recordIncome}
-                      onChange={(e) => setRecordIncome(e.target.checked)}
-                      className="rounded border-white/20"
+                      type="number"
+                      min={0}
+                      value={incomeAmount}
+                      onChange={(e) =>
+                        setIncomeAmount(Number(e.target.value) || 0)
+                      }
+                      className="input-field w-full rounded-xl px-3 py-1.5 text-xs font-mono"
                     />
-                    <span>
-                      Catat otomatis sebagai Pemasukan (Order Baru) di Keuangan
-                    </span>
-                  </label>
-
-                  {recordIncome ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="block text-[11px] text-white/65 mb-1">
-                          Nominal Pemasukan (Rp)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={incomeAmount}
-                          onChange={(e) =>
-                            setIncomeAmount(Number(e.target.value) || 0)
-                          }
-                          className="w-full rounded-xl bg-[#090A33] border border-white/15 px-3 py-1.5 text-xs text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-white/65 mb-1">
-                          Metode Pembayaran
-                        </label>
-                        <select
-                          value={paymentMethod}
-                          onChange={(e) =>
-                            setPaymentMethod(e.target.value as PaymentMethod)
-                          }
-                          className="w-full rounded-xl bg-[#090A33] border border-white/15 px-3 py-1.5 text-xs text-white"
-                        >
-                          <option value="QRIS">QRIS</option>
-                          <option value="Transfer">Transfer</option>
-                          <option value="Cash">Cash</option>
-                          <option value="Lainnya">Lainnya</option>
-                        </select>
-                      </div>
-                    </div>
-                  ) : null}
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#71717A] mb-1">
+                      Metode Pembayaran
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) =>
+                        setPaymentMethod(e.target.value as PaymentMethod)
+                      }
+                      className="input-field w-full rounded-xl px-3 py-1.5 text-xs"
+                    >
+                      <option value="QRIS">QRIS</option>
+                      <option value="Transfer">Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Lainnya">Lainnya</option>
+                    </select>
+                  </div>
                 </div>
               ) : null}
+            </div>
+          ) : null}
 
-              <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setFormModalOpen(false)}
-                  className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 text-xs font-medium text-white/80 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold px-4 py-2 text-xs cursor-pointer"
-                >
-                  {submitting ? "Menyimpan..." : "Simpan Pelanggan"}
-                </button>
-              </div>
-            </form>
+          <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/[0.08]">
+            <button
+              type="button"
+              onClick={() => setFormModalOpen(false)}
+              className="rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.08] px-4 py-2 text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] cursor-pointer transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold px-4 py-2 text-xs cursor-pointer transition"
+            >
+              {submitting ? "Menyimpan..." : "Simpan Pelanggan"}
+            </button>
           </div>
-        </div>
-      ) : null}
+        </form>
+      </Modal>
 
-      {/* Modal Konfirmasi Perpanjang (+30 Hari) & Pencatatan Pemasukan */}
-      {renewTarget ? (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#090A33] border border-white/15 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/10">
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  Perpanjang Masa Aktif (+1 Bulan)
-                </h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  {renewTarget.full_name} ({renewTarget.package_name})
-                </p>
+      {/* Modal Konfirmasi Perpanjang (+30 Hari) */}
+      <Modal
+        open={Boolean(renewTarget)}
+        onClose={() => setRenewTarget(null)}
+        title="Perpanjang Masa Aktif (+1 Bulan)"
+        subtitle={
+          renewTarget
+            ? `${renewTarget.full_name} (${renewTarget.package_name})`
+            : undefined
+        }
+        maxWidth="sm"
+      >
+        {renewTarget ? (
+          <form onSubmit={handleConfirmRenew} className="space-y-4">
+            <div className="rounded-xl surface-inset p-3.5 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-[#71717A]">Tanggal Habis Saat Ini</span>
+                <span className="font-mono text-[#FAFAFA] font-medium">
+                  {formatShortDate(renewTarget.end_date)}
+                </span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-[#71717A]">
+                  Setelah +{renewDays} Hari
+                </span>
+                <span className="font-mono text-[#FAFAFA] font-semibold">
+                  {formatShortDate(
+                    calculateRenewedEndDate(renewTarget.end_date, renewDays),
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Durasi Tambahan (Hari)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={renewDays}
+                onChange={(e) => setRenewDays(Number(e.target.value) || 30)}
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+
+            <div className="rounded-xl surface-inset p-4 space-y-3">
+              <label className="flex items-center gap-2.5 text-xs font-medium text-[#FAFAFA] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={renewRecordIncome}
+                  onChange={(e) => setRenewRecordIncome(e.target.checked)}
+                  className="accent-[#FAFAFA]"
+                />
+                <span>Catat pemasukan Perpanjangan ke halaman Keuangan</span>
+              </label>
+
+              {renewRecordIncome ? (
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-[#71717A] mb-1">
+                      Nominal (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={renewAmount}
+                      onChange={(e) =>
+                        setRenewAmount(Number(e.target.value) || 0)
+                      }
+                      className="input-field w-full rounded-xl px-3 py-1.5 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#71717A] mb-1">
+                      Metode Bayar
+                    </label>
+                    <select
+                      value={renewPaymentMethod}
+                      onChange={(e) =>
+                        setRenewPaymentMethod(e.target.value as PaymentMethod)
+                      }
+                      className="input-field w-full rounded-xl px-3 py-1.5 text-xs"
+                    >
+                      <option value="QRIS">QRIS</option>
+                      <option value="Transfer">Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Lainnya">Lainnya</option>
+                    </select>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-white/[0.08]">
               <button
                 type="button"
                 onClick={() => setRenewTarget(null)}
-                className="text-white/60 hover:text-white text-sm px-2 py-1"
+                className="rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.08] px-4 py-2 text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] cursor-pointer transition"
               >
-                &#10005;
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold px-4 py-2 text-xs cursor-pointer transition"
+              >
+                {submitting
+                  ? "Memproses..."
+                  : "Konfirmasi Perpanjang (+30 Hari)"}
               </button>
             </div>
-
-            <form onSubmit={handleConfirmRenew} className="space-y-4">
-              <div className="rounded-xl bg-[#121212]/80 border border-white/10 p-3.5 text-xs space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Tanggal Habis Saat Ini:</span>
-                  <span className="text-white font-medium">
-                    {formatShortDate(renewTarget.end_date)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">
-                    Tanggal Habis Setelah +{renewDays} Hari:
-                  </span>
-                  <span className="text-emerald-300 font-semibold">
-                    {formatShortDate(
-                      calculateRenewedEndDate(renewTarget.end_date, renewDays),
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-white/75 mb-1">
-                  Durasi Tambahan (Hari)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={renewDays}
-                  onChange={(e) => setRenewDays(Number(e.target.value) || 30)}
-                  className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white"
-                />
-              </div>
-
-              <div className="rounded-xl bg-[#121212]/80 border border-white/10 p-4 space-y-3">
-                <label className="flex items-center gap-2.5 text-xs font-medium text-white cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={renewRecordIncome}
-                    onChange={(e) => setRenewRecordIncome(e.target.checked)}
-                  />
-                  <span>Catat pemasukan Perpanjangan ke halaman Keuangan</span>
-                </label>
-
-                {renewRecordIncome ? (
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="block text-[11px] text-white/65 mb-1">
-                        Nominal (Rp)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={renewAmount}
-                        onChange={(e) =>
-                          setRenewAmount(Number(e.target.value) || 0)
-                        }
-                        className="w-full rounded-xl bg-[#090A33] border border-white/15 px-3 py-1.5 text-xs text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-white/65 mb-1">
-                        Metode Bayar
-                      </label>
-                      <select
-                        value={renewPaymentMethod}
-                        onChange={(e) =>
-                          setRenewPaymentMethod(e.target.value as PaymentMethod)
-                        }
-                        className="w-full rounded-xl bg-[#090A33] border border-white/15 px-3 py-1.5 text-xs text-white"
-                      >
-                        <option value="QRIS">QRIS</option>
-                        <option value="Transfer">Transfer</option>
-                        <option value="Cash">Cash</option>
-                        <option value="Lainnya">Lainnya</option>
-                      </select>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setRenewTarget(null)}
-                  className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 text-xs font-medium text-white/80 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-emerald-400 text-[#090A33] hover:bg-emerald-300 font-semibold px-4 py-2 text-xs cursor-pointer"
-                >
-                  {submitting
-                    ? "Memproses..."
-                    : "Konfirmasi Perpanjang (+30 Hari)"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-    </div>
+          </form>
+        ) : null}
+      </Modal>
+    </PageTransition>
   );
 }
 
@@ -1015,7 +1105,7 @@ export default function CustomersPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-8 text-center text-sm text-white/60">
+        <div className="p-8 text-center text-sm text-[#71717A]">
           Memuat daftar pelanggan...
         </div>
       }

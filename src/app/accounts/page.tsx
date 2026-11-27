@@ -1,6 +1,16 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
+import { motion } from "motion/react";
+import {
+  LayoutGrid,
+  Lock,
+  Pencil,
+  Plus,
+  Table2,
+  Trash2,
+  Users,
+} from "lucide-react";
 import type {
   CustomerRow,
   EnrichedCustomer,
@@ -20,9 +30,18 @@ import {
   getCustomerStatusMeta,
   getGroupStatusMeta,
 } from "@/components/formatters";
+import { CopyButton } from "@/components/ui/CopyButton";
+import { Modal } from "@/components/ui/Modal";
+import {
+  PageTransition,
+  StaggerContainer,
+  StaggerItem,
+} from "@/components/ui/MotionPrimitives";
+import { useToast } from "@/components/ui/ToastProvider";
 import { addDaysToDateString, getTodayDateString } from "@/lib/logic/customer";
 
 export default function AccountsPage() {
+  const toast = useToast();
   const {
     groups,
     selectedGroupMembers,
@@ -37,7 +56,6 @@ export default function AccountsPage() {
     loadGroupMembers,
   } = useAccounts();
 
-  // Demo fallback state so UI works interactively when Supabase is not configured
   const initialDemo = useMemo(() => buildDemoSeed(), []);
   const [demoGroups, setDemoGroups] = useState<FamilyGroupRow[]>(
     initialDemo.groups,
@@ -53,8 +71,8 @@ export default function AccountsPage() {
   }, [isUsingDemo, demoGroups, demoCustomers, groups]);
 
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  // Modal Tambah/Edit Akun state
   const [formOpen, setFormOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<FamilyGroupWithSlots | null>(
     null,
@@ -69,7 +87,6 @@ export default function AccountsPage() {
   const [status, setStatus] = useState<GroupStatus>("active");
   const [notes, setNotes] = useState("");
 
-  // Modal Lihat Anggota state
   const [membersModalGroup, setMembersModalGroup] =
     useState<FamilyGroupWithSlots | null>(null);
   const [demoSelectedMembers, setDemoSelectedMembers] = useState<
@@ -108,45 +125,76 @@ export default function AccountsPage() {
       group_type: groupType,
       max_slots: maxSlots,
       master_expired_at: masterExpiredAt,
-      status: groupType === "full" && status === "active" ? "full" : status,
+      status: (groupType === "full" && status === "active"
+        ? "full"
+        : status) as GroupStatus,
       notes: notes.trim() || null,
     };
 
-    if (isUsingDemo) {
+    try {
+      if (isUsingDemo) {
+        if (editingGroup) {
+          setDemoGroups((prev) =>
+            prev.map((item) =>
+              item.id === editingGroup.id ? { ...item, ...payload } : item,
+            ),
+          );
+          toast.success(`Grup ${payload.group_name} diperbarui`);
+        } else {
+          setDemoGroups((prev) => [
+            ...prev,
+            {
+              id: `demo-grp-${Date.now()}`,
+              ...payload,
+              created_at: getTodayDateString(),
+            },
+          ]);
+          toast.success(`Grup ${payload.group_name} ditambahkan`);
+        }
+        setFormOpen(false);
+        return;
+      }
+
       if (editingGroup) {
-        setDemoGroups((prev) =>
-          prev.map((item) =>
-            item.id === editingGroup.id ? { ...item, ...payload } : item,
-          ),
-        );
+        await updateGroup(editingGroup.id, payload);
+        toast.success(`Grup ${payload.group_name} diperbarui`);
       } else {
-        setDemoGroups((prev) => [
-          ...prev,
-          {
-            id: `demo-grp-${Date.now()}`,
-            ...payload,
-            created_at: getTodayDateString(),
-          },
-        ]);
+        await createGroup(payload);
+        toast.success(`Grup ${payload.group_name} ditambahkan`);
       }
       setFormOpen(false);
-      return;
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menyimpan data grup",
+      );
     }
-
-    if (editingGroup) {
-      await updateGroup(editingGroup.id, payload);
-    } else {
-      await createGroup(payload);
-    }
-    setFormOpen(false);
   }
 
   async function handleDeleteGroup(group: FamilyGroupWithSlots) {
-    if (isUsingDemo) {
-      setDemoGroups((prev) => prev.filter((item) => item.id !== group.id));
+    if (confirmDeleteId !== group.id) {
+      setConfirmDeleteId(group.id);
+      window.setTimeout(() => {
+        setConfirmDeleteId((current) =>
+          current === group.id ? null : current,
+        );
+      }, 3000);
       return;
     }
-    await deleteGroup(group.id);
+
+    setConfirmDeleteId(null);
+    try {
+      if (isUsingDemo) {
+        setDemoGroups((prev) => prev.filter((item) => item.id !== group.id));
+        toast.success(`Grup ${group.group_name} dihapus`);
+        return;
+      }
+      await deleteGroup(group.id);
+      toast.success(`Grup ${group.group_name} dihapus`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menghapus grup",
+      );
+    }
   }
 
   async function handleViewMembers(group: FamilyGroupWithSlots) {
@@ -170,71 +218,92 @@ export default function AccountsPage() {
     .reduce((acc, g) => acc + g.ready_slots, 0);
 
   return (
-    <div className="space-y-6">
+    <PageTransition className="space-y-6">
       {/* Header & Action Bar */}
-      <section className="bg-[#090A33] border border-white/10 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <section className="surface-card rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-base sm:text-lg font-semibold text-white">
+            <h2 className="text-base font-semibold text-[#FAFAFA] tracking-tight">
               Grup Family Sharing (Akun Induk)
             </h2>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-              {totalSharedReady} Slot Shared Ready
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  totalSharedReady > 0 ? "bg-[#22C55E]" : "bg-[#EF4444]"
+                }`}
+              />
+              {totalSharedReady} Slot Ready
             </span>
             {isUsingDemo ? (
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                Mode Preview Data Dummy
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#EAB308]" />
+                Preview Data Dummy
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-white/65 mt-1">
-            Kelola akun induk Google AI Pro. Grup bertipe{" "}
-            <strong className="text-white">Full Group</strong> otomatis dianggap
-            penuh (<code className="text-white/90">0 Slot Ready</code>).
+          <p className="text-xs text-[#71717A] mt-1">
+            Pantau kapasitas 5 slot per akun Google Pro. Grup{" "}
+            <strong className="text-[#E4E4E7]">Full Group</strong> otomatis
+            terkunci sebagai{" "}
+            <code className="font-mono text-[#E4E4E7]">0 Slot Ready</code>.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {/* View Toggle */}
-          <div className="inline-flex rounded-xl bg-[#121212] border border-white/10 p-1">
-            <button
-              type="button"
-              onClick={() => setViewMode("grid")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
-                viewMode === "grid"
-                  ? "bg-white/15 text-white"
-                  : "text-white/60 hover:text-white"
-              }`}
-            >
-              Card Grid
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("table")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
-                viewMode === "table"
-                  ? "bg-white/15 text-white"
-                  : "text-white/60 hover:text-white"
-              }`}
-            >
-              Tabel
-            </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative inline-flex rounded-xl surface-inset p-1">
+            {(
+              [
+                { value: "grid", label: "Card Grid", icon: LayoutGrid },
+                { value: "table", label: "Tabel", icon: Table2 },
+              ] as const
+            ).map((option) => {
+              const Icon = option.icon;
+              const active = viewMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setViewMode(option.value)}
+                  className={`relative z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    active ? "text-[#FAFAFA]" : "text-[#71717A] hover:text-[#E4E4E7]"
+                  }`}
+                >
+                  {active ? (
+                    <motion.span
+                      layoutId="accounts-view-toggle"
+                      transition={{
+                        type: "spring",
+                        stiffness: 420,
+                        damping: 35,
+                      }}
+                      className="absolute inset-0 rounded-lg bg-[#17171D] border border-white/[0.1]"
+                    />
+                  ) : null}
+                  <span className="relative z-10 inline-flex items-center gap-1.5">
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{option.label}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          <button
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             type="button"
             onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold text-xs sm:text-sm px-4 py-2.5 transition cursor-pointer shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold text-xs sm:text-sm px-4 py-2 transition cursor-pointer"
           >
-            <span>+ Tambah Akun Induk</span>
-          </button>
+            <Plus className="h-4 w-4" />
+            <span>Tambah Akun Induk</span>
+          </motion.button>
         </div>
       </section>
 
       {error && supabaseConfigured ? (
         <div
           role="alert"
-          className="rounded-2xl bg-rose-500/15 border border-rose-500/30 px-4 py-3 text-xs text-rose-200"
+          className="rounded-2xl bg-[#17171D] border border-white/[0.1] border-l-2 border-l-[#EF4444] px-4 py-3 text-xs text-[#E4E4E7]"
         >
           {error}
         </div>
@@ -245,7 +314,7 @@ export default function AccountsPage() {
           {[1, 2, 3].map((n) => (
             <div
               key={n}
-              className="h-52 rounded-2xl bg-[#090A33]/60 border border-white/10 animate-pulse"
+              className="h-56 rounded-2xl surface-card animate-pulse"
             />
           ))}
         </div>
@@ -253,150 +322,180 @@ export default function AccountsPage() {
 
       {/* Card Grid View */}
       {viewMode === "grid" ? (
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {activeGroups.map((group) => {
             const statusMeta = getGroupStatusMeta(group.effective_status);
-            const fillRatio =
-              group.group_type === "full"
-                ? 100
-                : Math.min(
-                    100,
-                    Math.round(
-                      (group.active_members_count /
-                        Math.max(1, group.max_slots)) *
-                        100,
-                    ),
-                  );
             const isAlmostFull =
-              !group.is_full && group.ready_slots === 1 && group.group_type === "shared";
+              !group.is_full &&
+              group.ready_slots === 1 &&
+              group.group_type === "shared";
+            const slotBlocks = Array.from(
+              { length: Math.max(1, group.max_slots) },
+              (_, idx) => idx,
+            );
+            const confirmingDelete = confirmDeleteId === group.id;
 
             return (
-              <div
-                key={group.id}
-                className="bg-[#090A33] border border-white/10 rounded-2xl p-5 flex flex-col justify-between hover:border-white/20 transition"
-              >
-                <div>
-                  {/* Card Top Row */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-semibold text-white">
-                          {group.group_name}
-                        </h3>
+              <StaggerItem key={group.id}>
+                <motion.div
+                  whileHover={{ y: -2 }}
+                  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                  className="surface-card surface-interactive rounded-2xl p-5 h-full flex flex-col justify-between"
+                >
+                  <div>
+                    {/* Top Row */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-semibold text-[#FAFAFA] tracking-tight whitespace-nowrap">
+                            {group.group_name}
+                          </h3>
+                          <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#17171D] text-[#A1A1AA] border border-white/[0.08]">
+                            {group.group_type === "full" ? (
+                              <Lock className="h-2.5 w-2.5" />
+                            ) : null}
+                            {group.group_type === "full"
+                              ? "Full Group"
+                              : "Shared"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 mt-1">
+                          <p className="text-xs font-mono text-[#71717A] truncate">
+                            {group.manager_email}
+                          </p>
+                          <CopyButton
+                            value={group.manager_email}
+                            label="Email manager"
+                          />
+                        </div>
+                      </div>
+
+                      <span
+                        className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusMeta.badgeClass}`}
+                      >
                         <span
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                            group.group_type === "full"
-                              ? "bg-purple-500/15 text-purple-200 border-purple-500/30"
-                              : "bg-white/10 text-white/80 border-white/15"
-                          }`}
-                        >
-                          {group.group_type === "full"
-                            ? "Full Group"
-                            : "Shared"}
+                          className={`h-1.5 w-1.5 rounded-full ${statusMeta.dotClass}`}
+                        />
+                        {statusMeta.label}
+                      </span>
+                    </div>
+
+                    {/* Visual 5-Slot Capacity Matrix */}
+                    <div className="mt-4 p-3.5 rounded-xl surface-inset">
+                      <div className="flex items-center justify-between text-xs mb-2.5">
+                        <span className="font-mono tabular-nums text-[#E4E4E7] font-medium">
+                          {group.active_members_count} / {group.max_slots} Terisi
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              group.is_full
+                                ? "bg-[#EF4444]"
+                                : isAlmostFull
+                                  ? "bg-[#EAB308]"
+                                  : "bg-[#22C55E]"
+                            }`}
+                          />
+                          {group.is_full
+                            ? "FULL"
+                            : `${group.ready_slots} Slot Ready`}
                         </span>
                       </div>
-                      <p className="text-xs text-white/65 mt-1 truncate">
-                        {group.manager_email}
-                      </p>
+
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {slotBlocks.map((idx) => {
+                          const isOccupied =
+                            group.group_type === "full" ||
+                            idx < group.active_members_count;
+
+                          let blockClass =
+                            "bg-[#17171D] border border-white/[0.07]";
+                          if (group.group_type === "full") {
+                            blockClass = "bg-[#52525B]";
+                          } else if (group.status === "suspended") {
+                            blockClass = "bg-[#EAB308]/75";
+                          } else if (isOccupied) {
+                            blockClass = "bg-[#FAFAFA]";
+                          }
+
+                          return (
+                            <div
+                              key={idx}
+                              title={
+                                group.group_type === "full"
+                                  ? "Full Group (Private)"
+                                  : isOccupied
+                                    ? `Slot ${idx + 1}: Terisi`
+                                    : `Slot ${idx + 1}: Ready`
+                              }
+                              className={`h-1.5 rounded-full transition-colors ${blockClass}`}
+                            />
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${statusMeta.badgeClass}`}
+                    {/* Meta Info */}
+                    <div className="mt-4 space-y-1.5 text-xs text-[#71717A]">
+                      <div className="flex items-center justify-between">
+                        <span>Expired Akun Induk</span>
+                        <span className="font-mono text-[#E4E4E7] font-medium">
+                          {formatShortDate(group.master_expired_at)}
+                        </span>
+                      </div>
+                      {group.notes ? (
+                        <p className="text-[11px] text-[#71717A] pt-0.5 truncate">
+                          Catatan: {group.notes}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Actions Footer */}
+                  <div className="mt-5 pt-3.5 border-t border-white/[0.08] flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleViewMembers(group)}
+                      className="flex-1 min-w-0 whitespace-nowrap inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.09] py-2 px-2.5 text-xs font-medium text-[#FAFAFA] transition cursor-pointer"
                     >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${statusMeta.dotClass}`}
-                      />
-                      {statusMeta.label}
-                    </span>
+                      <Users className="h-3.5 w-3.5 text-[#A1A1AA] shrink-0" />
+                      <span>Anggota ({group.active_members_count})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(group)}
+                      title="Edit grup"
+                      className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 rounded-xl bg-[#0C0C10] hover:bg-[#17171D] border border-white/[0.08] py-2 px-2.5 text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] transition cursor-pointer"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => void handleDeleteGroup(group)}
+                      className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1 rounded-xl border py-2 px-2.5 text-xs font-medium transition cursor-pointer ${
+                        confirmingDelete
+                          ? "bg-[#EF4444] text-white border-[#EF4444]"
+                          : "bg-[#0C0C10] hover:bg-[#17171D] border-white/[0.08] text-[#A1A1AA] hover:text-[#EF4444]"
+                      }`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>{confirmingDelete ? "Yakin?" : "Hapus"}</span>
+                    </button>
                   </div>
-
-                  {/* Slot Progress Section */}
-                  <div className="mt-5 p-3.5 rounded-xl bg-[#121212]/70 border border-white/10">
-                    <div className="flex items-center justify-between text-xs mb-2">
-                      <span className="text-white/75 font-medium">
-                        {group.active_members_count} / {group.max_slots} Terisi
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
-                          group.is_full
-                            ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
-                            : isAlmostFull
-                              ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
-                              : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                        }`}
-                      >
-                        {group.is_full
-                          ? "FULL"
-                          : `${group.ready_slots} Slot Ready`}
-                      </span>
-                    </div>
-
-                    <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
-                      <div
-                        style={{ width: `${fillRatio}%` }}
-                        className={`h-full rounded-full transition-all ${
-                          group.is_full
-                            ? "bg-rose-400"
-                            : isAlmostFull
-                              ? "bg-amber-400"
-                              : "bg-emerald-400"
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Meta Info */}
-                  <div className="mt-4 space-y-1 text-xs text-white/65">
-                    <div className="flex items-center justify-between">
-                      <span>Expired Akun Induk:</span>
-                      <span className="text-white font-medium">
-                        {formatShortDate(group.master_expired_at)}
-                      </span>
-                    </div>
-                    {group.notes ? (
-                      <p className="text-[11px] text-white/55 pt-1 truncate">
-                        Catatan: {group.notes}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* Actions Footer */}
-                <div className="mt-5 pt-3.5 border-t border-white/10 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleViewMembers(group)}
-                    className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 py-2 px-3 text-xs font-medium text-white transition cursor-pointer"
-                  >
-                    Lihat Anggota ({group.active_members_count})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(group)}
-                    className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 py-2 px-3 text-xs font-medium text-white/80 hover:text-white transition cursor-pointer"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => void handleDeleteGroup(group)}
-                    className="rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 py-2 px-3 text-xs font-medium text-rose-300 transition cursor-pointer"
-                  >
-                    Hapus
-                  </button>
-                </div>
-              </div>
+                </motion.div>
+              </StaggerItem>
             );
           })}
-        </section>
+        </StaggerContainer>
       ) : (
         /* Table View */
-        <section className="bg-[#090A33] border border-white/10 rounded-2xl overflow-hidden">
+        <section className="surface-card rounded-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/10 text-[11px] font-semibold uppercase tracking-wider text-white/60 bg-black/20">
+                <tr className="border-b border-white/[0.08] text-[11px] font-semibold uppercase tracking-wider text-[#71717A] bg-[#0C0C10]">
                   <th className="py-3.5 px-4">Nama Grup</th>
                   <th className="py-3.5 px-4">Email Manager</th>
                   <th className="py-3.5 px-4">Tipe</th>
@@ -406,50 +505,55 @@ export default function AccountsPage() {
                   <th className="py-3.5 px-4 text-right">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10 text-xs sm:text-sm">
+              <tbody className="divide-y divide-white/[0.07] text-xs sm:text-sm">
                 {activeGroups.map((group) => {
                   const statusMeta = getGroupStatusMeta(group.effective_status);
+                  const confirmingDelete = confirmDeleteId === group.id;
                   return (
                     <tr
                       key={group.id}
-                      className="hover:bg-white/[0.03] transition"
+                      className="hover:bg-[#17171D]/55 transition"
                     >
-                      <td className="py-3.5 px-4 font-semibold text-white">
+                      <td className="py-3.5 px-4 font-semibold text-[#FAFAFA] whitespace-nowrap">
                         {group.group_name}
                       </td>
-                      <td className="py-3.5 px-4 text-white/75">
-                        {group.manager_email}
+                      <td className="py-3.5 px-4 text-[#A1A1AA] font-mono text-xs whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <span>{group.manager_email}</span>
+                          <CopyButton
+                            value={group.manager_email}
+                            label="Email manager"
+                          />
+                        </span>
                       </td>
-                      <td className="py-3.5 px-4">
-                        <span className="px-2 py-0.5 rounded-md text-xs bg-white/10 text-white/85 border border-white/15">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-[#17171D] text-[#E4E4E7] border border-white/[0.08]">
                           {group.group_type === "full"
                             ? "Full Group"
                             : "Shared"}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <span className="text-white/85">
-                            {group.active_members_count} / {group.max_slots}{" "}
-                            Terisi
+                          <span className="font-mono text-xs text-[#E4E4E7]">
+                            {group.active_members_count} / {group.max_slots}
                           </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
-                              group.is_full
-                                ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
-                                : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                            }`}
-                          >
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                group.is_full ? "bg-[#EF4444]" : "bg-[#22C55E]"
+                              }`}
+                            />
                             {group.is_full
                               ? "FULL"
-                              : `${group.ready_slots} Slot Ready`}
+                              : `${group.ready_slots} Ready`}
                           </span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-white/80">
+                      <td className="py-3.5 px-4 font-mono text-xs text-[#A1A1AA] whitespace-nowrap">
                         {formatShortDate(group.master_expired_at)}
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
                           className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${statusMeta.badgeClass}`}
                         >
@@ -463,14 +567,14 @@ export default function AccountsPage() {
                         <button
                           type="button"
                           onClick={() => void handleViewMembers(group)}
-                          className="rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white cursor-pointer"
+                          className="rounded-lg bg-[#17171D] hover:bg-[#22222A] border border-white/[0.09] px-2.5 py-1.5 text-xs font-medium text-[#FAFAFA] cursor-pointer transition"
                         >
                           Lihat Anggota
                         </button>
                         <button
                           type="button"
                           onClick={() => openEditModal(group)}
-                          className="rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 text-xs text-white/80 cursor-pointer"
+                          className="rounded-lg bg-[#0C0C10] hover:bg-[#17171D] border border-white/[0.08] px-2.5 py-1.5 text-xs text-[#A1A1AA] hover:text-[#FAFAFA] cursor-pointer transition"
                         >
                           Edit
                         </button>
@@ -478,9 +582,13 @@ export default function AccountsPage() {
                           type="button"
                           disabled={submitting}
                           onClick={() => void handleDeleteGroup(group)}
-                          className="rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 px-2.5 py-1.5 text-xs text-rose-300 cursor-pointer"
+                          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium cursor-pointer transition ${
+                            confirmingDelete
+                              ? "bg-[#EF4444] text-white border-[#EF4444]"
+                              : "bg-[#0C0C10] hover:bg-[#17171D] border-white/[0.08] text-[#A1A1AA] hover:text-[#EF4444]"
+                          }`}
                         >
-                          Hapus
+                          {confirmingDelete ? "Yakin?" : "Hapus"}
                         </button>
                       </td>
                     </tr>
@@ -493,238 +601,210 @@ export default function AccountsPage() {
       )}
 
       {/* Modal Tambah / Edit Akun Google Pro */}
-      {formOpen ? (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-[#090A33] border border-white/15 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 mb-5 border-b border-white/10">
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  {editingGroup
-                    ? `Edit Grup ${editingGroup.group_name}`
-                    : "Tambah Akun Induk Google Pro"}
-                </h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  Atur tipe grup Shared (eceran) atau Full Group (private 1
-                  grup)
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setFormOpen(false)}
-                className="text-white/60 hover:text-white text-sm px-2 py-1"
-              >
-                &#10005;
-              </button>
+      <Modal
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={
+          editingGroup
+            ? `Edit Grup ${editingGroup.group_name}`
+            : "Tambah Akun Induk Google Pro"
+        }
+        subtitle="Atur tipe grup Shared (eceran) atau Full Group (private 1 grup)"
+      >
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Nama Grup
+              </label>
+              <input
+                placeholder="Nottura-01"
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm"
+              />
             </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Nama Grup
-                  </label>
-                  <input
-                    placeholder="Nottura-01"
-                    value={groupName}
-                    onChange={(e) => setGroupName(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Email Manager (Akun Induk)
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="master01@gmail.com"
-                    value={managerEmail}
-                    onChange={(e) => setManagerEmail(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Tipe Grup
-                  </label>
-                  <select
-                    value={groupType}
-                    onChange={(e) => setGroupType(e.target.value as GroupType)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  >
-                    <option value="shared">Shared (Eceran)</option>
-                    <option value="full">Full Group (Private)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Maks. Slot
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={5}
-                    value={maxSlots}
-                    onChange={(e) => setMaxSlots(Number(e.target.value) || 5)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Status Akun
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as GroupStatus)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  >
-                    <option value="active">Aktif</option>
-                    <option value="full">Penuh</option>
-                    <option value="suspended">Bermasalah / Suspended</option>
-                  </select>
-                </div>
-              </div>
-
-              {groupType === "full" ? (
-                <div className="rounded-xl bg-amber-500/15 border border-amber-500/30 px-3.5 py-2.5 text-xs text-amber-200">
-                  Logika Khusus PRD: Karena tipe grup dipilih{" "}
-                  <strong>Full Group</strong>, slot otomatis dianggap penuh (
-                  <code>0 Slot Ready</code>) meskipun hanya diinput 1
-                  koordinator.
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Tanggal Expired Akun Induk
-                  </label>
-                  <input
-                    type="date"
-                    value={masterExpiredAt}
-                    onChange={(e) => setMasterExpiredAt(e.target.value)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Catatan (Opsional)
-                  </label>
-                  <input
-                    placeholder="Keterangan grup..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-white/40"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setFormOpen(false)}
-                  className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 text-xs font-medium text-white/80 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold px-4 py-2 text-xs cursor-pointer"
-                >
-                  {submitting ? "Menyimpan..." : "Simpan Akun"}
-                </button>
-              </div>
-            </form>
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Email Manager (Akun Induk)
+              </label>
+              <input
+                type="email"
+                placeholder="master01@gmail.com"
+                value={managerEmail}
+                onChange={(e) => setManagerEmail(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
           </div>
-        </div>
-      ) : null}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Tipe Grup
+              </label>
+              <select
+                value={groupType}
+                onChange={(e) => setGroupType(e.target.value as GroupType)}
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="shared">Shared (Eceran)</option>
+                <option value="full">Full Group (Private)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Maks. Slot
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={maxSlots}
+                onChange={(e) => setMaxSlots(Number(e.target.value) || 5)}
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Status Akun
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as GroupStatus)}
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="active">Aktif</option>
+                <option value="full">Penuh</option>
+                <option value="suspended">Bermasalah / Suspended</option>
+              </select>
+            </div>
+          </div>
+
+          {groupType === "full" ? (
+            <div className="rounded-xl bg-[#17171D] border border-white/[0.09] border-l-2 border-l-[#EAB308] px-3.5 py-2.5 text-xs text-[#E4E4E7]">
+              Karena bertipe <strong>Full Group</strong>, kapasitas otomatis
+              dianggap penuh (<code className="font-mono">0 Slot Ready</code>)
+              meskipun hanya diisi 1 koordinator.
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Tanggal Expired Akun Induk
+              </label>
+              <input
+                type="date"
+                value={masterExpiredAt}
+                onChange={(e) => setMasterExpiredAt(e.target.value)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Catatan (Opsional)
+              </label>
+              <input
+                placeholder="Keterangan grup..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/[0.08]">
+            <button
+              type="button"
+              onClick={() => setFormOpen(false)}
+              className="rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.08] px-4 py-2 text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] cursor-pointer transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold px-4 py-2 text-xs cursor-pointer transition"
+            >
+              {submitting ? "Menyimpan..." : "Simpan Akun"}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Modal Lihat Anggota Grup */}
-      {membersModalGroup ? (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-[#090A33] border border-white/15 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/10">
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  Anggota Grup {membersModalGroup.group_name}
-                </h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  Manager: {membersModalGroup.manager_email} &bull;{" "}
-                  {membersModalGroup.active_members_count} /{" "}
-                  {membersModalGroup.max_slots} Terisi
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMembersModalGroup(null)}
-                className="text-white/60 hover:text-white text-sm px-2 py-1"
-              >
-                &#10005;
-              </button>
-            </div>
+      <Modal
+        open={Boolean(membersModalGroup)}
+        onClose={() => setMembersModalGroup(null)}
+        title={
+          membersModalGroup
+            ? `Anggota Grup ${membersModalGroup.group_name}`
+            : "Anggota Grup"
+        }
+        subtitle={
+          membersModalGroup
+            ? `Manager: ${membersModalGroup.manager_email} • ${membersModalGroup.active_members_count} / ${membersModalGroup.max_slots} Terisi`
+            : undefined
+        }
+      >
+        {loadingMembers ? (
+          <p className="py-8 text-center text-xs text-[#71717A]">
+            Memuat daftar anggota...
+          </p>
+        ) : displayedMembers.length === 0 ? (
+          <p className="py-8 text-center text-xs text-[#71717A]">
+            Belum ada anggota yang terdaftar di grup ini.
+          </p>
+        ) : (
+          <ul className="divide-y divide-white/[0.08] max-h-80 overflow-y-auto">
+            {displayedMembers.map((member, index) => {
+              const st = getCustomerStatusMeta(member.status);
+              return (
+                <li
+                  key={member.id}
+                  className="py-3 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#FAFAFA] truncate">
+                      {index + 1}. {member.full_name}
+                    </p>
+                    <p className="text-xs text-[#71717A] truncate mt-0.5 font-mono">
+                      {member.gmail} &bull; Habis{" "}
+                      {formatShortDate(member.end_date)}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${st.badgeClass}`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${st.dotClass}`}
+                    />
+                    {st.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-            {loadingMembers ? (
-              <p className="py-8 text-center text-xs text-white/60">
-                Memuat daftar anggota...
-              </p>
-            ) : displayedMembers.length === 0 ? (
-              <p className="py-8 text-center text-xs text-white/60">
-                Belum ada anggota yang terdaftar di grup ini.
-              </p>
-            ) : (
-              <ul className="divide-y divide-white/10 max-h-80 overflow-y-auto">
-                {displayedMembers.map((member, index) => {
-                  const st = getCustomerStatusMeta(member.status);
-                  return (
-                    <li
-                      key={member.id}
-                      className="py-3 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-white truncate">
-                          {index + 1}. {member.full_name}
-                        </p>
-                        <p className="text-xs text-white/60 truncate">
-                          {member.gmail} &bull; Habis{" "}
-                          {formatShortDate(member.end_date)}
-                        </p>
-                      </div>
-                      <span
-                        className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${st.badgeClass}`}
-                      >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${st.dotClass}`}
-                        />
-                        {st.label}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            <div className="mt-5 pt-3 border-t border-white/10 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setMembersModalGroup(null)}
-                className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 px-4 py-2 text-xs font-medium text-white cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
+        <div className="mt-5 pt-3 border-t border-white/[0.08] flex justify-end">
+          <button
+            type="button"
+            onClick={() => setMembersModalGroup(null)}
+            className="rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.09] px-4 py-2 text-xs font-medium text-[#FAFAFA] cursor-pointer transition"
+          >
+            Tutup
+          </button>
         </div>
-      ) : null}
-    </div>
+      </Modal>
+    </PageTransition>
   );
 }

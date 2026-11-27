@@ -1,6 +1,15 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
+import { motion } from "motion/react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Download,
+  Plus,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import type {
   PaymentMethod,
   TransactionCategory,
@@ -15,15 +24,24 @@ import {
 import { useFinance } from "@/hooks/useFinance";
 import { buildDemoSeed } from "@/components/demo-data";
 import {
-  MONTH_OPTIONS,
   formatRupiah,
   formatShortDate,
   getCategoryLabel,
   getMonthLabel,
   getTransactionTypeMeta,
 } from "@/components/formatters";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
+import { Modal } from "@/components/ui/Modal";
+import {
+  PageTransition,
+  StaggerContainer,
+  StaggerItem,
+} from "@/components/ui/MotionPrimitives";
+import { PeriodStepper } from "@/components/ui/PeriodStepper";
+import { useToast } from "@/components/ui/ToastProvider";
 
 export default function FinancePage() {
+  const toast = useToast();
   const {
     transactions,
     summary,
@@ -42,7 +60,6 @@ export default function FinancePage() {
     downloadCsv,
   } = useFinance();
 
-  // Demo mode fallback when Supabase is not configured locally
   const initialDemo = useMemo(() => buildDemoSeed(), []);
   const [demoTransactions, setDemoTransactions] = useState<TransactionRow[]>(
     initialDemo.transactions,
@@ -64,7 +81,20 @@ export default function FinancePage() {
     return calculateMonthlyFinanceSummary(demoTransactions, year, month);
   }, [isUsingDemo, summary, demoTransactions, year, month]);
 
-  // Modal Form Catat Transaksi
+  const profitMargin = useMemo(() => {
+    if (activeSummary.income <= 0) return 0;
+    return Math.round((activeSummary.netProfit / activeSummary.income) * 100);
+  }, [activeSummary]);
+
+  const cashflowSplit = useMemo(() => {
+    const total = activeSummary.income + activeSummary.expense;
+    if (total <= 0) return { incomePct: 50, expensePct: 50 };
+    const incomePct = Math.round((activeSummary.income / total) * 100);
+    return { incomePct, expensePct: 100 - incomePct };
+  }, [activeSummary]);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [type, setType] = useState<TransactionType>("expense");
   const [category, setCategory] = useState<TransactionCategory>("account_cost");
@@ -85,48 +115,74 @@ export default function FinancePage() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isUsingDemo) {
-      setDemoTransactions((prev) => [
-        {
-          id: `demo-tx-${Date.now()}`,
-          type,
-          category,
-          amount,
-          customer_id: null,
-          payment_method: paymentMethod,
-          description: description.trim() || null,
-          transaction_date: transactionDate,
-          recorded_by: "arya@nottura.my.id",
-          created_at: transactionDate,
-        },
-        ...prev,
-      ]);
-      setModalOpen(false);
-      return;
-    }
+    try {
+      if (isUsingDemo) {
+        setDemoTransactions((prev) => [
+          {
+            id: `demo-tx-${Date.now()}`,
+            type,
+            category,
+            amount,
+            customer_id: null,
+            payment_method: paymentMethod,
+            description: description.trim() || null,
+            transaction_date: transactionDate,
+            recorded_by: "nottura@local",
+            created_at: transactionDate,
+          },
+          ...prev,
+        ]);
+        toast.success("Transaksi berhasil dicatat");
+        setModalOpen(false);
+        return;
+      }
 
-    await createTransaction({
-      type,
-      category,
-      amount,
-      payment_method: paymentMethod,
-      description: description.trim() || null,
-      transaction_date: transactionDate,
-    });
-    setModalOpen(false);
+      await createTransaction({
+        type,
+        category,
+        amount,
+        payment_method: paymentMethod,
+        description: description.trim() || null,
+        transaction_date: transactionDate,
+      });
+      toast.success("Transaksi berhasil dicatat");
+      setModalOpen(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal mencatat transaksi",
+      );
+    }
   }
 
   async function handleDelete(id: string) {
-    if (isUsingDemo) {
-      setDemoTransactions((prev) => prev.filter((item) => item.id !== id));
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      window.setTimeout(() => {
+        setConfirmDeleteId((current) => (current === id ? null : current));
+      }, 3000);
       return;
     }
-    await deleteTransaction(id);
+
+    setConfirmDeleteId(null);
+    try {
+      if (isUsingDemo) {
+        setDemoTransactions((prev) => prev.filter((item) => item.id !== id));
+        toast.success("Transaksi dihapus");
+        return;
+      }
+      await deleteTransaction(id);
+      toast.success("Transaksi dihapus");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menghapus transaksi",
+      );
+    }
   }
 
   function handleExportCsv() {
     if (!isUsingDemo) {
       downloadCsv();
+      toast.success("Laporan CSV berhasil diunduh");
       return;
     }
     const csv = exportTransactionsToCsv(activeTransactions);
@@ -137,118 +193,180 @@ export default function FinancePage() {
     anchor.download = `nottura-finance-${year}-${String(month).padStart(2, "0")}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+    toast.success("Laporan CSV berhasil diunduh");
   }
 
   return (
-    <div className="space-y-6">
+    <PageTransition className="space-y-6">
       {/* Header Toolbar */}
-      <section className="bg-[#090A33] border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <section className="surface-card rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-base sm:text-lg font-semibold text-white">
-              Arus Kas & Riwayat Transaksi
+            <h2 className="text-base font-semibold text-[#FAFAFA] tracking-tight">
+              Arus Kas &amp; Riwayat Transaksi
             </h2>
             {isUsingDemo ? (
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                Mode Preview Data Dummy
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#EAB308]" />
+                Preview Data Dummy
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-white/65 mt-0.5">
-            Rekap pemasukan paket pelanggan & pengeluaran modal akun induk bulan{" "}
-            <span className="text-white font-medium">
+          <p className="text-xs text-[#71717A] mt-1">
+            Rekap pemasukan paket pelanggan &amp; pengeluaran modal bulan{" "}
+            <span className="text-[#E4E4E7] font-medium">
               {getMonthLabel(month)} {year}
             </span>
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
+        <div className="flex flex-wrap items-center gap-2">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             type="button"
             onClick={() => openTransactionModal("expense")}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/35 px-3.5 py-2 text-xs sm:text-sm font-medium transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#17171D] hover:bg-[#22222A] text-[#E4E4E7] border border-white/[0.1] px-3.5 py-2 text-xs sm:text-sm font-medium transition cursor-pointer"
           >
-            <span>+ Catat Pengeluaran</span>
-          </button>
-          <button
+            <Plus className="h-3.5 w-3.5 text-[#EF4444]" />
+            <span>Catat Pengeluaran</span>
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             type="button"
             onClick={() => openTransactionModal("income")}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold px-3.5 py-2 text-xs sm:text-sm transition cursor-pointer shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold px-3.5 py-2 text-xs sm:text-sm transition cursor-pointer"
           >
-            <span>+ Catat Pemasukan</span>
-          </button>
-          <button
+            <Plus className="h-3.5 w-3.5" />
+            <span>Catat Pemasukan</span>
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             type="button"
             onClick={handleExportCsv}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/15 px-3.5 py-2 text-xs sm:text-sm font-medium transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#0C0C10] hover:bg-[#17171D] text-[#E4E4E7] border border-white/[0.09] px-3.5 py-2 text-xs sm:text-sm font-medium transition cursor-pointer"
           >
+            <Download className="h-3.5 w-3.5 text-[#A1A1AA]" />
             <span>Export CSV</span>
-          </button>
+          </motion.button>
         </div>
       </section>
 
       {error && supabaseConfigured ? (
         <div
           role="alert"
-          className="rounded-2xl bg-rose-500/15 border border-rose-500/30 px-4 py-3 text-xs text-rose-200"
+          className="rounded-2xl bg-[#17171D] border border-white/[0.1] border-l-2 border-l-[#EF4444] px-4 py-3 text-xs text-[#E4E4E7]"
         >
           {error}
         </div>
       ) : null}
 
       {/* Monthly Finance Summary Cards */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-[#090A33] border border-white/10 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-white/65">
-              Total Pemasukan ({getMonthLabel(month)})
-            </span>
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-              Masuk
-            </span>
+      <StaggerContainer className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StaggerItem>
+          <div className="surface-card surface-interactive rounded-2xl p-5 h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-[#17171D] border border-white/[0.08] flex items-center justify-center shrink-0">
+                  <ArrowUpRight className="h-4 w-4 text-[#22C55E]" />
+                </div>
+                <span className="text-xs font-medium text-[#A1A1AA] truncate">
+                  Total Pemasukan ({getMonthLabel(month)})
+                </span>
+              </div>
+              <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" />
+                Masuk
+              </span>
+            </div>
+            <div className="mt-4">
+              <AnimatedNumber
+                value={activeSummary.income}
+                formatter={formatRupiah}
+                className="text-2xl sm:text-[26px] font-bold tracking-tight text-[#FAFAFA]"
+              />
+            </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold tracking-tight text-emerald-400 mt-3">
-            {formatRupiah(activeSummary.income)}
-          </p>
-        </div>
+        </StaggerItem>
 
-        <div className="bg-[#090A33] border border-white/10 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-white/65">
-              Total Pengeluaran ({getMonthLabel(month)})
-            </span>
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30">
-              Keluar
-            </span>
+        <StaggerItem>
+          <div className="surface-card surface-interactive rounded-2xl p-5 h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-[#17171D] border border-white/[0.08] flex items-center justify-center shrink-0">
+                  <ArrowDownRight className="h-4 w-4 text-[#EF4444]" />
+                </div>
+                <span className="text-xs font-medium text-[#A1A1AA] truncate">
+                  Total Pengeluaran ({getMonthLabel(month)})
+                </span>
+              </div>
+              <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#17171D] text-[#A1A1AA] border border-white/[0.09]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#EF4444]" />
+                Keluar
+              </span>
+            </div>
+            <div className="mt-4">
+              <AnimatedNumber
+                value={activeSummary.expense}
+                formatter={formatRupiah}
+                className="text-2xl sm:text-[26px] font-bold tracking-tight text-[#FAFAFA]"
+              />
+            </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold tracking-tight text-rose-400 mt-3">
-            {formatRupiah(activeSummary.expense)}
-          </p>
-        </div>
+        </StaggerItem>
 
-        <div className="bg-[#090A33] border border-white/10 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-white/65">
-              Profit Bersih ({getMonthLabel(month)})
-            </span>
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-white/10 text-white/80 border border-white/15">
-              {activeTransactions.length} Transaksi
-            </span>
+        <StaggerItem>
+          <div className="surface-card surface-interactive rounded-2xl p-5 h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-[#17171D] border border-white/[0.08] flex items-center justify-center shrink-0">
+                  <Wallet className="h-4 w-4 text-[#FAFAFA]" />
+                </div>
+                <span className="text-xs font-medium text-[#A1A1AA] truncate">
+                  Profit Bersih ({getMonthLabel(month)})
+                </span>
+              </div>
+              <span className="shrink-0 whitespace-nowrap px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]">
+                Margin {profitMargin}%
+              </span>
+            </div>
+            <div className="mt-4 space-y-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <AnimatedNumber
+                  value={activeSummary.netProfit}
+                  formatter={formatRupiah}
+                  className={`text-2xl sm:text-[26px] font-bold tracking-tight ${
+                    activeSummary.netProfit >= 0
+                      ? "text-[#FAFAFA]"
+                      : "text-[#EF4444]"
+                  }`}
+                />
+                <span className="text-[11px] font-mono text-[#71717A] shrink-0">
+                  {activeTransactions.length} trx
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-[#17171D] overflow-hidden flex gap-0.5">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${cashflowSplit.incomePct}%` }}
+                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  className="h-full rounded-full bg-[#FAFAFA]"
+                />
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${cashflowSplit.expensePct}%` }}
+                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  className="h-full rounded-full bg-[#3F3F46]"
+                />
+              </div>
+            </div>
           </div>
-          <p
-            className={`text-2xl sm:text-3xl font-bold tracking-tight mt-3 ${
-              activeSummary.netProfit >= 0 ? "text-white" : "text-rose-400"
-            }`}
-          >
-            {formatRupiah(activeSummary.netProfit)}
-          </p>
-        </div>
-      </section>
+        </StaggerItem>
+      </StaggerContainer>
 
       {/* Filter Bar & Transactions Table */}
-      <section className="bg-[#090A33] border border-white/10 rounded-2xl overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5">
+      <section className="surface-card rounded-2xl overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-white/[0.08] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="inline-flex flex-wrap items-center gap-1 rounded-xl surface-inset p-1">
             {(
               [
                 { value: "all", label: "Semua Transaksi" },
@@ -262,57 +380,48 @@ export default function FinancePage() {
                   key={tab.value}
                   type="button"
                   onClick={() => setTypeFilter(tab.value)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer border ${
-                    active
-                      ? "bg-white text-[#090A33] border-white font-semibold"
-                      : "bg-[#121212] text-white/70 hover:text-white border-white/10"
+                  className={`relative px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    active ? "text-[#FAFAFA]" : "text-[#71717A] hover:text-[#E4E4E7]"
                   }`}
                 >
-                  {tab.label}
+                  {active ? (
+                    <motion.span
+                      layoutId="finance-type-tab"
+                      transition={{
+                        type: "spring",
+                        stiffness: 420,
+                        damping: 35,
+                      }}
+                      className="absolute inset-0 rounded-lg bg-[#17171D] border border-white/[0.1]"
+                    />
+                  ) : null}
+                  <span className="relative z-10">{tab.label}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value) || 1)}
-              aria-label="Filter Bulan"
-              className="rounded-xl bg-[#121212] border border-white/15 px-3 py-1.5 text-xs sm:text-sm text-white"
-            >
-              {MONTH_OPTIONS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-
-            <input
-              type="number"
-              min={2024}
-              max={2100}
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value) || year)}
-              aria-label="Filter Tahun"
-              className="w-24 rounded-xl bg-[#121212] border border-white/15 px-3 py-1.5 text-xs sm:text-sm text-white"
-            />
-          </div>
+          <PeriodStepper
+            month={month}
+            year={year}
+            onMonthChange={setMonth}
+            onYearChange={setYear}
+          />
         </div>
 
         {loading && activeTransactions.length === 0 ? (
-          <div className="p-8 text-center text-xs text-white/60">
+          <div className="p-8 text-center text-xs text-[#71717A]">
             Memuat riwayat transaksi...
           </div>
         ) : activeTransactions.length === 0 ? (
-          <div className="p-10 text-center text-sm text-white/55">
+          <div className="p-10 text-center text-sm text-[#71717A]">
             Belum ada transaksi tercatat pada periode ini.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/10 text-[11px] font-semibold uppercase tracking-wider text-white/60 bg-black/20">
+                <tr className="border-b border-white/[0.08] text-[11px] font-semibold uppercase tracking-wider text-[#71717A] bg-[#0C0C10]">
                   <th className="py-3.5 px-4">Tanggal</th>
                   <th className="py-3.5 px-4">Tipe</th>
                   <th className="py-3.5 px-4">Kategori</th>
@@ -323,41 +432,45 @@ export default function FinancePage() {
                   <th className="py-3.5 px-4 text-right">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10 text-xs sm:text-sm">
+              <tbody className="divide-y divide-white/[0.07] text-xs sm:text-sm">
                 {activeTransactions.map((tx) => {
                   const typeMeta = getTransactionTypeMeta(tx.type);
+                  const confirmingDelete = confirmDeleteId === tx.id;
                   return (
                     <tr
                       key={tx.id}
-                      className="hover:bg-white/[0.03] transition"
+                      className="hover:bg-[#17171D]/55 transition"
                     >
-                      <td className="py-3.5 px-4 text-white/80 whitespace-nowrap">
+                      <td className="py-3.5 px-4 font-mono text-xs text-[#A1A1AA] whitespace-nowrap">
                         {formatShortDate(tx.transaction_date)}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${typeMeta.badgeClass}`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium ${typeMeta.badgeClass}`}
                         >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${typeMeta.dotClass}`}
+                          />
                           {typeMeta.label}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-white font-medium whitespace-nowrap">
+                      <td className="py-3.5 px-4 text-[#FAFAFA] font-medium whitespace-nowrap text-xs sm:text-sm">
                         {getCategoryLabel(tx.category)}
                       </td>
-                      <td className="py-3.5 px-4 text-white/75">
+                      <td className="py-3.5 px-4 text-[#A1A1AA] text-xs sm:text-sm">
                         {tx.description ?? "-"}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-md text-xs bg-white/10 text-white/80 border border-white/15">
+                        <span className="px-2 py-0.5 rounded-md text-xs font-mono bg-[#0C0C10] text-[#E4E4E7] border border-white/[0.08]">
                           {tx.payment_method ?? "-"}
                         </span>
                       </td>
                       <td
-                        className={`py-3.5 px-4 font-semibold whitespace-nowrap ${typeMeta.amountClass}`}
+                        className={`py-3.5 px-4 font-mono font-semibold tabular-nums whitespace-nowrap ${typeMeta.amountClass}`}
                       >
                         {typeMeta.sign} {formatRupiah(tx.amount)}
                       </td>
-                      <td className="py-3.5 px-4 text-white/60 text-xs whitespace-nowrap">
+                      <td className="py-3.5 px-4 font-mono text-[#71717A] text-xs whitespace-nowrap">
                         {tx.recorded_by}
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
@@ -365,9 +478,14 @@ export default function FinancePage() {
                           type="button"
                           disabled={submitting}
                           onClick={() => void handleDelete(tx.id)}
-                          className="rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-2.5 py-1 text-xs cursor-pointer"
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium cursor-pointer transition ${
+                            confirmingDelete
+                              ? "bg-[#EF4444] text-white border-[#EF4444]"
+                              : "bg-[#0C0C10] hover:bg-[#17171D] text-[#A1A1AA] hover:text-[#EF4444] border-white/[0.08]"
+                          }`}
                         >
-                          Hapus
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>{confirmingDelete ? "Yakin?" : "Hapus"}</span>
                         </button>
                       </td>
                     </tr>
@@ -380,150 +498,135 @@ export default function FinancePage() {
       </section>
 
       {/* Modal Form Catat Transaksi */}
-      {modalOpen ? (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#090A33] border border-white/15 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 mb-5 border-b border-white/10">
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  {type === "income"
-                    ? "Catat Pemasukan Manual"
-                    : "Catat Pengeluaran / Modal"}
-                </h3>
-                <p className="text-xs text-white/60 mt-0.5">
-                  Otomatis menyimpan email admin aktif pada kolom audit{" "}
-                  <code>recorded_by</code>
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="text-white/60 hover:text-white text-sm px-2 py-1"
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={
+          type === "income"
+            ? "Catat Pemasukan Manual"
+            : "Catat Pengeluaran / Modal"
+        }
+        subtitle="Otomatis menyimpan email admin aktif pada kolom audit recorded_by"
+        maxWidth="sm"
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Tipe Transaksi
+              </label>
+              <select
+                value={type}
+                onChange={(e) => {
+                  const nextType = e.target.value as TransactionType;
+                  setType(nextType);
+                  setCategory(
+                    nextType === "income" ? "new_order" : "account_cost",
+                  );
+                }}
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
               >
-                &#10005;
-              </button>
+                <option value="income">Masuk (Pemasukan)</option>
+                <option value="expense">Keluar (Pengeluaran)</option>
+              </select>
             </div>
 
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Tipe Transaksi
-                  </label>
-                  <select
-                    value={type}
-                    onChange={(e) => {
-                      const nextType = e.target.value as TransactionType;
-                      setType(nextType);
-                      setCategory(
-                        nextType === "income" ? "new_order" : "account_cost",
-                      );
-                    }}
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white"
-                  >
-                    <option value="income">Masuk (Pemasukan)</option>
-                    <option value="expense">Keluar (Pengeluaran)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Kategori
-                  </label>
-                  <select
-                    value={category}
-                    onChange={(e) =>
-                      setCategory(e.target.value as TransactionCategory)
-                    }
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white"
-                  >
-                    <option value="new_order">Order Baru</option>
-                    <option value="renewal">Perpanjangan</option>
-                    <option value="account_cost">Modal Akun</option>
-                    <option value="operational">Lainnya / Operasional</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Nominal (Rp)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={amount}
-                    onChange={(e) => setAmount(Number(e.target.value) || 0)}
-                    required
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-white/75 mb-1">
-                    Metode Pembayaran
-                  </label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) =>
-                      setPaymentMethod(e.target.value as PaymentMethod)
-                    }
-                    className="w-full rounded-xl bg-[#121212] border border-white/15 px-3 py-2 text-sm text-white"
-                  >
-                    <option value="QRIS">QRIS</option>
-                    <option value="Transfer">Transfer</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Lainnya">Lainnya</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-white/75 mb-1">
-                  Tanggal Transaksi
-                </label>
-                <input
-                  type="date"
-                  value={transactionDate}
-                  onChange={(e) => setTransactionDate(e.target.value)}
-                  required
-                  className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-white/75 mb-1">
-                  Keterangan
-                </label>
-                <input
-                  placeholder="Contoh: Beli akun induk Nottura-05 / Perpanjang domain"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full rounded-xl bg-[#121212] border border-white/15 px-3.5 py-2 text-sm text-white"
-                />
-              </div>
-
-              <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 text-xs font-medium text-white/80 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-white text-[#090A33] hover:bg-white/90 font-semibold px-4 py-2 text-xs cursor-pointer"
-                >
-                  {submitting ? "Menyimpan..." : "Simpan Transaksi"}
-                </button>
-              </div>
-            </form>
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Kategori
+              </label>
+              <select
+                value={category}
+                onChange={(e) =>
+                  setCategory(e.target.value as TransactionCategory)
+                }
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="new_order">Order Baru</option>
+                <option value="renewal">Perpanjangan</option>
+                <option value="account_cost">Modal Akun</option>
+                <option value="operational">Lainnya / Operasional</option>
+              </select>
+            </div>
           </div>
-        </div>
-      ) : null}
-    </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Nominal (Rp)
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={amount}
+                onChange={(e) => setAmount(Number(e.target.value) || 0)}
+                required
+                className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+                Metode Pembayaran
+              </label>
+              <select
+                value={paymentMethod}
+                onChange={(e) =>
+                  setPaymentMethod(e.target.value as PaymentMethod)
+                }
+                className="input-field w-full rounded-xl px-3 py-2 text-sm"
+              >
+                <option value="QRIS">QRIS</option>
+                <option value="Transfer">Transfer</option>
+                <option value="Cash">Cash</option>
+                <option value="Lainnya">Lainnya</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+              Tanggal Transaksi
+            </label>
+            <input
+              type="date"
+              value={transactionDate}
+              onChange={(e) => setTransactionDate(e.target.value)}
+              required
+              className="input-field w-full rounded-xl px-3.5 py-2 text-sm font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
+              Keterangan
+            </label>
+            <input
+              placeholder="Contoh: Beli akun induk Nottura-05 / Perpanjang domain"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="input-field w-full rounded-xl px-3.5 py-2 text-sm"
+            />
+          </div>
+
+          <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-white/[0.08]">
+            <button
+              type="button"
+              onClick={() => setModalOpen(false)}
+              className="rounded-xl bg-[#17171D] hover:bg-[#22222A] border border-white/[0.08] px-4 py-2 text-xs font-medium text-[#A1A1AA] hover:text-[#FAFAFA] cursor-pointer transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-xl bg-[#FAFAFA] text-[#09090B] hover:bg-white font-semibold px-4 py-2 text-xs cursor-pointer transition"
+            >
+              {submitting ? "Menyimpan..." : "Simpan Transaksi"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </PageTransition>
   );
 }

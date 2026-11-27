@@ -68,21 +68,22 @@ export function getCustomerStatusMeta(status: CustomerStatus): {
       return {
         label: "Aktif",
         badgeClass:
-          "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
-        dotClass: "bg-emerald-400",
+          "bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]",
+        dotClass: "bg-[#22C55E]",
       };
     case "expiring_soon":
       return {
         label: "H-3 Expired",
         badgeClass:
-          "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-        dotClass: "bg-amber-400",
+          "bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]",
+        dotClass: "bg-[#EAB308]",
       };
     case "expired":
       return {
         label: "Expired",
-        badgeClass: "bg-rose-500/15 text-rose-300 border border-rose-500/30",
-        dotClass: "bg-rose-400",
+        badgeClass:
+          "bg-[#17171D] text-[#A1A1AA] border border-white/[0.09]",
+        dotClass: "bg-[#EF4444]",
       };
   }
 }
@@ -97,20 +98,22 @@ export function getGroupStatusMeta(status: GroupStatus): {
       return {
         label: "Aktif",
         badgeClass:
-          "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
-        dotClass: "bg-emerald-400",
+          "bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]",
+        dotClass: "bg-[#22C55E]",
       };
     case "full":
       return {
         label: "Penuh",
-        badgeClass: "bg-rose-500/15 text-rose-300 border border-rose-500/30",
-        dotClass: "bg-rose-400",
+        badgeClass:
+          "bg-[#17171D] text-[#A1A1AA] border border-white/[0.09]",
+        dotClass: "bg-[#EF4444]",
       };
     case "suspended":
       return {
         label: "Bermasalah / Suspended",
-        badgeClass: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-        dotClass: "bg-amber-400",
+        badgeClass:
+          "bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]",
+        dotClass: "bg-[#EAB308]",
       };
   }
 }
@@ -131,22 +134,24 @@ export function getCategoryLabel(category: TransactionCategory): string {
 export function getTransactionTypeMeta(type: TransactionType): {
   label: string;
   badgeClass: string;
+  dotClass: string;
   amountClass: string;
   sign: string;
 } {
   if (type === "income") {
     return {
       label: "Masuk",
-      badgeClass:
-        "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
-      amountClass: "text-emerald-400",
+      badgeClass: "bg-[#17171D] text-[#E4E4E7] border border-white/[0.09]",
+      dotClass: "bg-[#22C55E]",
+      amountClass: "text-[#FAFAFA]",
       sign: "+",
     };
   }
   return {
     label: "Keluar",
-    badgeClass: "bg-rose-500/15 text-rose-300 border border-rose-500/30",
-    amountClass: "text-rose-400",
+    badgeClass: "bg-[#17171D] text-[#A1A1AA] border border-white/[0.09]",
+    dotClass: "bg-[#EF4444]",
+    amountClass: "text-[#A1A1AA]",
     sign: "-",
   };
 }
