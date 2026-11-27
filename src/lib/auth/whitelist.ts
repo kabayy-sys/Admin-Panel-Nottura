@@ -18,15 +18,26 @@ export async function checkAdminWhitelist(
   const { data, error } = await supabase
     .from("admin_whitelist")
     .select("id, email, name, role, created_at")
-    .limit(10);
+    .limit(50);
 
   if (error || !data) {
+    if (error) {
+      console.error("[Auth] checkAdminWhitelist error:", error.message, error.details);
+    }
     return null;
   }
 
   const rows = data as AdminWhitelistRow[];
-  return (
-    rows.find((row) => row.email.trim().toLowerCase() === normalizedEmail) ??
-    null
+  const match = rows.find(
+    (row) => row.email.trim().toLowerCase() === normalizedEmail,
   );
+
+  if (!match) {
+    console.warn(
+      `[Auth] Whitelist check failed for "${normalizedEmail}". Available in DB:`,
+      rows.map((r) => r.email),
+    );
+  }
+
+  return match ?? null;
 }

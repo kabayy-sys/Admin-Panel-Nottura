@@ -61,10 +61,15 @@ function LoginContent() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const queryErrorCode = searchParams.get("error");
+  const attemptedEmail = searchParams.get("email");
   const bannerError =
     localError ??
     error ??
-    (queryErrorCode ? (ERROR_MESSAGES[queryErrorCode] ?? queryErrorCode) : null);
+    (queryErrorCode === "access_denied" && attemptedEmail
+      ? `Akses ditolak. Email Google "${attemptedEmail}" tidak terdaftar di admin_whitelist.`
+      : queryErrorCode
+        ? (ERROR_MESSAGES[queryErrorCode] ?? queryErrorCode)
+        : null);
 
   async function handleDummySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

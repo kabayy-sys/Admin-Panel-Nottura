@@ -35,9 +35,10 @@ export async function GET(request: Request) {
   const whitelisted = await checkAdminWhitelist(supabase, data.user.email);
   if (!whitelisted) {
     await supabase.auth.signOut();
-    return NextResponse.redirect(
-      new URL("/login?error=access_denied", url.origin),
-    );
+    const deniedUrl = new URL("/login", url.origin);
+    deniedUrl.searchParams.set("error", "access_denied");
+    deniedUrl.searchParams.set("email", data.user.email);
+    return NextResponse.redirect(deniedUrl);
   }
 
   return NextResponse.redirect(new URL(nextPath, url.origin));
