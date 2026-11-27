@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { checkAdminWhitelist } from "@/lib/auth/whitelist";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { isSupabaseConfigured, getSupabaseEnv } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 function sanitizeRedirectPath(nextParam: string | null): string {
@@ -32,7 +33,22 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=oauth_failed", url.origin));
   }
 
-  const whitelisted = await checkAdminWhitelist(supabase, data.user.email);
+  const { url: supabaseUrl, anonKey } = getSupabaseEnv();
+  const accessToken = data.session?.access_token;
+
+  // Supabase client dengan token pengguna agar PostgREST mengenali role 'authenticated'
+  const clientForCheck = accessToken
+    ? createClient(supabaseUrl, anonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+        auth: { persistSession: false },
+      })
+    : supabase;
+
+  const whitelisted = await checkAdminWhitelist(clientForCheck, data.user.email);
   if (!whitelisted) {
     await supabase.auth.signOut();
     const deniedUrl = new URL("/login", url.origin);

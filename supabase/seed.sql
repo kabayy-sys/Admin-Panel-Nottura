@@ -6,8 +6,8 @@
 
 insert into public.admin_whitelist (email, name, role)
 values
-  ('raken.nottura@gmail.com', 'Raken', 'owner'),
-  ('arya.nottura@gmail.com', 'Arya', 'admin'),
-  ('cs1.nottura@gmail.com', 'Admin CS 1', 'admin'),
-  ('cs2.nottura@gmail.com', 'Admin CS 2', 'admin')
-on conflict (email) do nothing;
+  ('rakenriski3366@gmail.com', 'Raken', 'owner'),
+  ('sahputradamar40@gmail.com', 'Arya', 'admin'),
+  ('ychel4508@gmail.com', 'Chelo', 'admin'),
+  ('riduwann.1999@gmail.com', 'Riduwan', 'admin')
+on conflict (email) do update set role = excluded.role;
