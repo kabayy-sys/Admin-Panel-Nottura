@@ -127,6 +127,17 @@ revoke all on function public.is_whitelisted_owner() from public;
 grant execute on function public.is_whitelisted_owner() to authenticated;
 
 -- ----------------------------------------------------------------------------
+-- 5b. Berikan Table Permissions (GRANT) ke role authenticated
+-- (RLS tetap membatasi akses baris per baris via is_whitelisted_admin)
+-- ----------------------------------------------------------------------------
+grant usage on schema public to authenticated, anon, service_role;
+grant all on table public.admin_whitelist to authenticated, service_role;
+grant all on table public.family_groups to authenticated, service_role;
+grant all on table public.customers to authenticated, service_role;
+grant all on table public.transactions to authenticated, service_role;
+grant all on all sequences in schema public to authenticated, service_role;
+
+-- ----------------------------------------------------------------------------
 -- 6. Aktifkan Row Level Security (RLS) di seluruh tabel
 -- ----------------------------------------------------------------------------
 alter table public.admin_whitelist enable row level security;
